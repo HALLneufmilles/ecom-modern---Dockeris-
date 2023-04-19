@@ -21,10 +21,10 @@ const createNav = () => {
         </div>
         <ul class="links-container">
             <li class="link-item"><a href="../index.html" class="link">home</a></li>
-            <li class="link-item"><a href="http://localhost:5000/search/women" class="link">women</a></li>
-            <li class="link-item"><a href="http://localhost:5000/search/men" class="link">men</a></li>
-            <li class="link-item"><a href="http://localhost:5000/search/kids" class="link">kids</a></li>
-            <li class="link-item"><a href="http://localhost:5000/seller" class="link"> || seller</a></li>
+            <li class="link-item"><a href="https://robe-oyster.cyclic.app/search/women" class="link">women</a></li>
+            <li class="link-item"><a href="https://robe-oyster.cyclic.app/search/men" class="link">men</a></li>
+            <li class="link-item"><a href="https://robe-oyster.cyclic.app/search/kids" class="link">kids</a></li>
+            <li class="link-item"><a href="https://robe-oyster.cyclic.app/seller" class="link"> || seller</a></li>
         </ul>
     `;
 };
