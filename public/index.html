@@ -1,0 +1,59 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta http-equiv="X-UA-Compatible" content="IE=edge" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Clothing - Best Apparels Online Store</title>
+
+    <link rel="stylesheet" href="css/homesliders.css" />
+  </head>
+  <body>
+    <nav class="navbar"></nav>
+
+    <!-- hero section -->
+    <header class="hero-section">
+      <div class="content">
+        <img src="img/light-logo.png" class="logo" alt="" />
+        <p class="sub-heading">best fashion collection of all time</p>
+      </div>
+    </header>
+
+    <section id="men-tshirt-products"></section>
+
+    <!-- collections -->
+    <section class="collection-container">
+      <a href="#" class="collection">
+        <img src="img/women-collection.png" alt="" />
+        <p class="collection-title">
+          women <br />
+          apparels
+        </p>
+      </a>
+      <a href="#" class="collection">
+        <img src="img/men-collection.png" alt="" />
+        <p class="collection-title">
+          men <br />
+          apparels
+        </p>
+      </a>
+      <a href="#" class="collection">
+        <img src="img/accessories-collection.png" alt="" />
+        <p class="collection-title">accessories</p>
+      </a>
+    </section>
+
+    <section id="men-tshirt-products-2"></section>
+
+    <footer></footer>
+
+    <script src="js/nav.js"></script>
+    <script src="js/footer.js"></script>
+    <script src="js/homesliders.js"></script>
+
+    <script>
+      getProducts("men").then((data) => createProductSlider(data, "#men-tshirt-products", "Men"));
+      getProducts("women").then((data) => createProductSlider(data, "#men-tshirt-products-2", "Women"));
+    </script>
+  </body>
+</html>

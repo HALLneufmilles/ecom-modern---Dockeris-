@@ -1,0 +1,22 @@
+{
+  "name": "ecomwebsite",
+  "version": "1.0.0",
+  "description": "",
+  "main": "index.js",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "nodemon server.js"
+  },
+  "author": "",
+  "license": "ISC",
+  "dependencies": {
+    "aws-sdk": "^2.997.0",
+    "bcrypt": "^5.0.1",
+    "dotenv": "^10.0.0",
+    "express.js": "^1.0.0",
+    "firebase-admin": "^9.11.1",
+    "nodemailer": "^6.6.5",
+    "nodemon": "^2.0.12",
+    "stripe": "^11.16.0"
+  }
+}
