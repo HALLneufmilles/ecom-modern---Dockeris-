@@ -113,7 +113,7 @@ const des = document.querySelector("#des");
 let sizes = []; // will store all the sizes
 
 const stock = document.querySelector("#stock");
-const tags = document.querySelector("#tags");
+const tags = document.querySelector("#selected");
 const tac = document.querySelector("#tac");
 
 // buttons

@@ -34,7 +34,7 @@ const sendData = (path, data) => {
   })
     .then((res) => res.json())
     .then((response) => {
-      console.log("sendData", response);
+      //console.log("sendData", response);
       processData(response);
     });
 };
@@ -49,7 +49,7 @@ const processData = (data) => {
     }
   } else if (data.name) {
     // create authToken
-    console.log("processData", data);
+    //console.log("processData", data);
     const user = {
       name: data.name,
       email: data.email,

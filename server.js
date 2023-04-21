@@ -363,7 +363,7 @@ app.post("/get-products", (req, res) => {
 
 app.post("/delete-product", (req, res) => {
   let { id } = req.body;
-  console.log(req.body);
+  //console.log(req.body);
   docRef = db.collection("products").doc(id);
   // console.log(`docRef : `, docRef);
   docRef.get().then((product) => {

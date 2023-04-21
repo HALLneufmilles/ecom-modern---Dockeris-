@@ -1,5 +1,5 @@
-const TagsSeller = ["Apple", "Apricot", "Banana", "Cherry"];
-
+// const TagsSeller = ["Apple", "Apricot", "Banana", "Cherry"];
+const TagsSeller = JSON.parse(sessionStorage.getItem("user")).tagsSeller;
 const tagList = document.querySelector("#tagList");
 const newElement = document.querySelector("#newElement");
 const inputTag = document.querySelector("#inputTag");
