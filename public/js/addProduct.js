@@ -60,7 +60,7 @@ uploadImages.forEach((fileupload, index) => {
         .then((url) => {
           fetch(url, {
             method: "PUT",
-            headers: new Headers({ "Content-Type": "image/jpeg" }), // modif en image/jpeg pour transformer les image en jpeg afin que stripe puisse les afficher
+            headers: new Headers({ "Content-Type": "multipart/form-data" }), // modif en image/jpeg pour transformer les image en jpeg afin que stripe puisse les afficher
             body: file,
           }).then((res) => {
             imageUrl = url.split("?")[0];
