@@ -24,7 +24,7 @@ dotenv.config();
 
 // aws parameters
 const region = "eu-west-3";
-const bucketName = "ecom-modern-web-clothing";
+const bucketName = "monpremiersite";
 const accessKeyId = process.env.AWS_ACCESS_KEY;
 const secretAccessKey = process.env.AWS_SECRET_KEY;
 
