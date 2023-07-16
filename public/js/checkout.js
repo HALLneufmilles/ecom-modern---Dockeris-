@@ -7,6 +7,7 @@ window.addEventListener("load", () => {
   if (location.search.includes("payment=done")) {
     let items = [];
     localStorage.setItem("cart", JSON.stringify(items));
+    delete localStorage.cart;
     showAlert("order is placed", "success");
   }
 
@@ -84,3 +85,4 @@ const getAddress = () => {
     return { address, street, city, state, pincode, landmark };
   }
 };
+// https://chat.openai.com/c/2b3f5686-c011-4ac3-ae59-d8b7fcf18d73

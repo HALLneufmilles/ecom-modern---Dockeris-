@@ -38,7 +38,7 @@ updateTagList();
 
 newElement.addEventListener("click", () => {
   const newTag = inputTag.value;
-  if (newTag && newTag.slice(-1) !== "s" && !newTag.includes("-")) {
+  if (newTag) {
     TagsSeller.push(newTag);
     updateTagList();
     inputTag.value = "";

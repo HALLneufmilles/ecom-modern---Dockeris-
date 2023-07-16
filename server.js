@@ -257,7 +257,7 @@ app.post("/login", (req, res) => {
           name: data.name,
           email: data.email,
           seller: data.seller,
-          tagsSeller: seller.data().tagsSeller ? seller.data().tagsSeller : null,
+          tagsSeller: seller.exists ? seller.data().tagsSeller : null,
           cart: saved.exists ? saved.data().cart : [],
           wishlist: saved.exists ? saved.data().wishlist : [],
         };
@@ -563,6 +563,7 @@ let stripeGateway = stripe(process.env.stripe_key);
 
 // On prépare l'adresse de notre domaine qu'il faut communiquer à sprite pour qu'il nous retourne sa réponse.
 let DOMAIN = process.env.DOMAIN;
+// module.exports = { DOMAIN };
 
 // On prépare une requete sever pour qu'il demande une url de paiement à stripe. Pour ça, il faut communiquer à stripe ce dont il à besoin
 app.post("/stripe-checkout", async (req, res) => {
@@ -576,12 +577,11 @@ app.post("/stripe-checkout", async (req, res) => {
     // stripe payment 3
     // On demande à stripe de rediriger l'utilisateur vers l'adresse (end-point) ${DOMAIN}/success donc http://localhost:5000/success
     // en lui passant en parametre, cad après le signe "?" 'session_id' et 'order' pour que lorsque le navigateur ateindra ce end-point,
-    // une fetch sera executer pour enregistrer l'achat dans la base de données 'firebase'.
-    // comme le end-point '/success' n'existe pas encore, on va le créer ... voir stripe payment 4.
-    success_url: `${DOMAIN}/success?session_id={CHECKOUT_SESSION_ID}&order=${JSON.stringify(req.body)}`,
+    // une fetch est executer automatiquement pour enregistrer l'achat dans la base de données 'firebase', voir : stripe payment 4.
+    success_url: `${DOMAIN}/success?session_id={CHECKOUT_SESSION_ID}&order=${encodeURIComponent(JSON.stringify(req.body))}`,
     // même chose en cas d'annulation de la commande par l'utilisateur ( sur la page stripe il y à une flache "retour" vers la gauche pour annuler le paiement)
     cancel_url: `${DOMAIN}/checkout?payment_fail=true`,
-    // enfin on communique le items à payer sous forme d'un tableau d'objets correspondant à chaque items à partir de req.body.items qui donne accès à "cart",
+    // enfin on communique les items à payer sous forme d'un tableau d'objets correspondant à chaque items à partir de req.body.items qui donne accès à "cart",
     // qui est lui même un tableau d'objet.(ex: cart: [{"item":"2","name":"Porte-manteau gros plan jpeg"…st-3.amazonaws.com/89416347401679846304030.jpg"}] )
     // les items sont transmis par la fetch POST "/stripe-checkout" de checkout.js
 
