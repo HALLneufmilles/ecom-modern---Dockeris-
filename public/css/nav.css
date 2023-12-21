@@ -97,6 +97,7 @@
 
 .link:hover {
   opacity: 1;
+  color: red;
 }
 
 .login-logout-popup {

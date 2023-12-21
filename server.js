@@ -26,7 +26,9 @@ const serviceAccount = {
   type: process.env.TYPE,
   project_id: process.env.PROJECT_ID,
   private_key_id: process.env.PRIVATE_KEY_ID,
-  private_key: process.env.PRIVATE_KEY ? process.env.PRIVATE_KEY.replace(/\\n/gm, "\n") : undefined,
+  private_key: process.env.PRIVATE_KEY
+    ? process.env.PRIVATE_KEY.replace(/\\n/gm, "\n")
+    : undefined,
   client_email: process.env.CLIENT_EMAIL,
   client_id: process.env.CLIENT_ID,
   auth_uri: process.env.AUTH_URI,
@@ -245,28 +247,30 @@ app.post("/login", (req, res) => {
   const userPromise = db.collection("users").doc(email).get();
   const savedPromise = db.collection("saved").doc(email).get();
 
-  Promise.all([userPromise, savedPromise, sellerPromise]).then(([user, saved, seller]) => {
-    if (!user.exists) {
-      return res.json({ alert: "log in email does not exist" });
-    }
-
-    bcrypt.compare(password, user.data().password, (err, result) => {
-      if (result) {
-        const data = user.data();
-        const response = {
-          name: data.name,
-          email: data.email,
-          seller: data.seller,
-          tagsSeller: seller.exists ? seller.data().tagsSeller : null,
-          cart: saved.exists ? saved.data().cart : [],
-          wishlist: saved.exists ? saved.data().wishlist : [],
-        };
-        return res.json(response);
-      } else {
-        return res.json({ alert: "password is incorrect" });
+  Promise.all([userPromise, savedPromise, sellerPromise]).then(
+    ([user, saved, seller]) => {
+      if (!user.exists) {
+        return res.json({ alert: "log in email does not exist" });
       }
-    });
-  });
+
+      bcrypt.compare(password, user.data().password, (err, result) => {
+        if (result) {
+          const data = user.data();
+          const response = {
+            name: data.name,
+            email: data.email,
+            seller: data.seller,
+            tagsSeller: seller.exists ? seller.data().tagsSeller : null,
+            cart: saved.exists ? saved.data().cart : [],
+            wishlist: saved.exists ? saved.data().wishlist : [],
+          };
+          return res.json(response);
+        } else {
+          return res.json({ alert: "password is incorrect" });
+        }
+      });
+    }
+  );
 });
 
 // seller route
@@ -276,7 +280,13 @@ app.get("/seller", (req, res) => {
 
 app.post("/seller", (req, res) => {
   let { name, about, address, number, tac, legit, email } = req.body;
-  if (!name.length || !address.length || !about.length || number.length < 10 || !Number(number)) {
+  if (
+    !name.length ||
+    !address.length ||
+    !about.length ||
+    number.length < 10 ||
+    !Number(number)
+  ) {
     return res.json({ alert: "some inforamation(s) is/are invalid" });
   } else if (!tac || !legit) {
     return res.json({ alert: "you must agree to our terms and conditions" });
@@ -314,14 +324,31 @@ app.get("/s3url", (req, res) => {
 
 // add product
 app.post("/add-product", (req, res) => {
-  let { name, shortDes, des, images, sizes, actualPrice, discount, sellPrice, stock, tags, tac, email, draft, id } = req.body;
+  let {
+    name,
+    shortDes,
+    des,
+    images,
+    sizes,
+    actualPrice,
+    discount,
+    sellPrice,
+    stock,
+    tags,
+    tac,
+    email,
+    draft,
+    id,
+  } = req.body;
 
   // validation
   if (!draft) {
     if (!name.length) {
       return res.json({ alert: "enter product name" });
     } else if (shortDes.length > 100 || shortDes.length < 10) {
-      return res.json({ alert: "short description must be between 10 to 100 letters long" });
+      return res.json({
+        alert: "short description must be between 10 to 100 letters long",
+      });
     } else if (!des.length) {
       return res.json({ alert: "enter detail description about the product" });
     } else if (!images.length) {
@@ -335,14 +362,19 @@ app.post("/add-product", (req, res) => {
     } else if (stock < 20) {
       return res.json({ alert: "you should have at least 20 items in stock" });
     } else if (!tags.length) {
-      return res.json({ alert: "enter few tags to help ranking your product in search" });
+      return res.json({
+        alert: "enter few tags to help ranking your product in search",
+      });
     } else if (!tac) {
       return res.json({ alert: "you must agree to our terms and conditions" });
     }
   }
 
   // add product
-  let docName = id == undefined ? `${name.toLowerCase()}-${Math.floor(Math.random() * 5000)}` : id;
+  let docName =
+    id == undefined
+      ? `${name.toLowerCase()}-${Math.floor(Math.random() * 5000)}`
+      : id;
   db.collection("products")
     .doc(docName)
     .set(req.body)
@@ -509,7 +541,9 @@ app.post("/savecart", (req, res) => {
 
   // Mise à jour de la collection "sellers"
   if (tagsSeller) {
-    promises.push(db.collection("sellers").doc(docName).set({ tagsSeller }, { merge: true }));
+    promises.push(
+      db.collection("sellers").doc(docName).set({ tagsSeller }, { merge: true })
+    );
   }
 
   // Exécution de toutes les promises
@@ -578,7 +612,9 @@ app.post("/stripe-checkout", async (req, res) => {
     // On demande à stripe de rediriger l'utilisateur vers l'adresse (end-point) ${DOMAIN}/success donc http://localhost:5000/success
     // en lui passant en parametre, cad après le signe "?" 'session_id' et 'order' pour que lorsque le navigateur ateindra ce end-point,
     // une fetch est executer automatiquement pour enregistrer l'achat dans la base de données 'firebase', voir : stripe payment 4.
-    success_url: `${DOMAIN}/success?session_id={CHECKOUT_SESSION_ID}&order=${encodeURIComponent(JSON.stringify(req.body))}`,
+    success_url: `${DOMAIN}/success?session_id={CHECKOUT_SESSION_ID}&order=${encodeURIComponent(
+      JSON.stringify(req.body)
+    )}`,
     // même chose en cas d'annulation de la commande par l'utilisateur ( sur la page stripe il y à une flache "retour" vers la gauche pour annuler le paiement)
     cancel_url: `${DOMAIN}/checkout?payment_fail=true`,
     // enfin on communique les items à payer sous forme d'un tableau d'objets correspondant à chaque items à partir de req.body.items qui donne accès à "cart",
@@ -729,5 +765,5 @@ app.use((req, res) => {
 });
 
 app.listen(5000, () => {
-  console.log("listening on port 5000.......");
+  console.log("listening on port 5000 Or 3000 with Docker Contener");
 });
