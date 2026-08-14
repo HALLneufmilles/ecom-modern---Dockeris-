@@ -5,3 +5,6 @@ node_modules
 testconfig.js
 firebaseConfig.js
 ecom-website-ef3e5-firebase-adminsdk-igrd4-993f185ab0.json
+# Playwright
+test-results/
+playwright-report/

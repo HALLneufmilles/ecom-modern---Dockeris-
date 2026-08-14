@@ -18,5 +18,8 @@
     "nodemailer": "^6.6.5",
     "nodemon": "^2.0.12",
     "stripe": "^11.16.0"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.54.2"
   }
 }
