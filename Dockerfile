@@ -35,7 +35,7 @@
 # Run the application.
 # CMD npm start
 
-ARG NODE_VERSION=18.12.0
+ARG NODE_VERSION=22.23.2
 
 # Étape de base partagée entre développement et production
 FROM node:${NODE_VERSION}-alpine as base
