@@ -50,8 +50,6 @@
 #   db-password:
 #     file: db/password.txt
 
-version: "3.8"
-
 services:
   # Service pour le développement
   server-dev:
