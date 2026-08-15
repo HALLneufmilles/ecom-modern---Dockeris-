@@ -21,7 +21,7 @@ test("F-18 - modifier la quantité puis supprimer un produit du panier", async (
   await expect(page).toHaveURL(/\/products\/.+/);
 
   // 3. Attendre que la fiche soit réellement chargée.
-  await expect(page.locator(".product-brand")).not.toHaveText("");
+  await expect(page.locator(".product-details .product-brand")).not.toHaveText("");
 
   // 4. Choisir une taille disponible.
   const availableSize = page.locator(".size-radio-btn:visible").first();
