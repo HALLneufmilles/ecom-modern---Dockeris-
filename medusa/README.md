@@ -125,7 +125,7 @@ cp apps/storefront/.env.template apps/storefront/.env.local
 NEXT_PUBLIC_MEDUSA_PUBLISHABLE_KEY=pk_6c3...
 ```
 
-10.  Start storefront:
+10. Start storefront:
 
 ```bash
 cd apps/storefront
@@ -144,13 +144,13 @@ pnpm dev
 
 The storefront is configured via environment variables in `apps/storefront/.env.local`:
 
-| Variable | Description | Default |
-|----------|-------------|---------|
-| `NEXT_PUBLIC_MEDUSA_PUBLISHABLE_KEY` | Publishable API key from your Medusa backend | — |
-| `NEXT_PUBLIC_MEDUSA_BACKEND_URL` | URL of your Medusa backend | `http://localhost:9000` |
-| `NEXT_PUBLIC_DEFAULT_REGION` | Default region country code | `dk` |
-| `NEXT_PUBLIC_BASE_URL` | Base URL of the storefront | `https://localhost:8000` |
-| `NEXT_PUBLIC_STRIPE_KEY` | Stripe publishable key (optional) | — |
+| Variable                             | Description                                  | Default                  |
+| ------------------------------------ | -------------------------------------------- | ------------------------ |
+| `NEXT_PUBLIC_MEDUSA_PUBLISHABLE_KEY` | Publishable API key from your Medusa backend | —                        |
+| `NEXT_PUBLIC_MEDUSA_BACKEND_URL`     | URL of your Medusa backend                   | `http://localhost:9000`  |
+| `NEXT_PUBLIC_DEFAULT_REGION`         | Default region country code                  | `dk`                     |
+| `NEXT_PUBLIC_BASE_URL`               | Base URL of the storefront                   | `https://localhost:8000` |
+| `NEXT_PUBLIC_STRIPE_KEY`             | Stripe publishable key (optional)            | —                        |
 
 ## Resources
 
