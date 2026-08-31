@@ -94,7 +94,25 @@ services:
       test: ["CMD-SHELL", "pg_isready -U medusa -d medusa"]
       interval: 10s
       timeout: 5s
-      retries: 5
+      retries:
+        5
+
+        # Backend e-commerce Medusa
+  medusa:
+    build:
+      context: ./medusa
+    container_name: ecom-modern-medusa
+    ports:
+      - "9000:9000"
+      - "5173:5173"
+    env_file:
+      - ./medusa/apps/backend/.env
+    environment:
+      NODE_ENV: development
+      DATABASE_URL: "postgresql://medusa:${POSTGRES_PASSWORD}@postgres:5432/medusa"
+    depends_on:
+      postgres:
+        condition: service_healthy
 
 volumes:
   postgres-data:
