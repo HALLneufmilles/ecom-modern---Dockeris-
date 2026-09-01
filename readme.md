@@ -12,13 +12,21 @@ nom github : ecom-moderne-dockerise
 
 Les commandes de ce document doivent être exécutées depuis la racine du projet, dans le dossier qui contient `compose.yaml`.
 
-Le projet contient actuellement trois **services Docker Compose** :
+Le projet contient actuellement quatre **services Docker Compose** :
 
 - `server-dev` : boutique actuelle en environnement de développement, accessible sur `http://localhost:5000`
 - `server-prod` : même boutique en environnement de production local, accessible sur `http://localhost:5001`
 - `postgres` : PostgreSQL local destiné à Medusa, exposé sur le port `5432`
+- `medusa` : moteur e-commerce et Store API, accessibles sur `http://localhost:9000`
 
-Medusa et Redis seront ajoutés plus tard comme services supplémentaires.
+Redis sera ajouté plus tard si le projet en a besoin.
+
+Pour le proxy temporaire F-14 entre `server-dev` et la Store API Medusa, l'environnement local de `server-dev` doit définir les variables suivantes :
+
+- `MEDUSA_BACKEND_URL`
+- `MEDUSA_PUBLISHABLE_API_KEY`
+
+Leurs valeurs restent exclusivement dans le fichier `.env` local et ne doivent pas être commitées.
 
 > 💡 Pour le travail courant, on cible en priorité les services dont on a réellement besoin.
 > Éviter `docker compose up -d` sans nom de service si l'on ne veut pas démarrer tout ce qui est défini dans `compose.yaml`.
@@ -836,7 +844,7 @@ docker compose down -v
 
 ---
 
-## 0.17 PostgreSQL, la base `medusa` et le futur logiciel Medusa
+## 0.17 PostgreSQL, la base `medusa` et Medusa
 
 Dans `compose.yaml`, nous avons défini :
 
@@ -871,15 +879,17 @@ Le mot `medusa` désigne ici :
 - une **base PostgreSQL** appelée `medusa` ;
 - un **utilisateur PostgreSQL** appelé `medusa`.
 
-Cela ne signifie pas que le logiciel Medusa est déjà installé.
-
-La situation actuelle est :
+Le service Medusa est installé et utilise cette base via `DATABASE_URL`. La situation actuelle est :
 
 ```text
+Medusa
+   │
+   │ DATABASE_URL
+   ▼
 PostgreSQL
-│
-└── base "medusa"
-    └── actuellement vide
+   │
+   └── base "medusa"
+       └── tables e-commerce gérées par Medusa
 ```
 
 Nous avons vérifié la connexion avec :
@@ -896,36 +906,16 @@ Puis :
 
 a confirmé la connexion à la base `medusa`.
 
-Et :
+La commande suivante permet d'afficher les tables Medusa présentes :
 
 ```text
 \dt
 ```
 
-a indiqué qu'aucune table n'existe encore, ce qui est normal avant l'installation de Medusa.
-
 Pour quitter `psql` :
 
 ```text
 \q
-```
-
-Plus tard :
-
-```text
-Medusa
-   │
-   │ DATABASE_URL
-   ▼
-PostgreSQL
-   │
-   └── base "medusa"
-       ├── produits
-       ├── variantes
-       ├── clients
-       ├── paniers
-       ├── commandes
-       └── autres tables gérées par Medusa
 ```
 
 ---
@@ -940,22 +930,7 @@ Docker Desktop
 └── projet Compose : ecom-modern-dockerise
     │
     ├── server-dev
-    │   └── boutique actuelle
-    │
-    └── postgres
-        └── PostgreSQL
-            └── volume postgres-data
-```
-
-Après installation de Medusa :
-
-```text
-Docker Desktop
-│
-└── projet Compose : ecom-modern-dockerise
-    │
-    ├── server-dev
-    │   └── boutique actuelle
+    │   └── boutique actuelle + proxy temporaire F-14
     │
     ├── medusa
     │   └── moteur e-commerce + Medusa Admin

@@ -96,6 +96,90 @@ app.get("/", (req, res) => {
   res.sendFile(path.join(staticPath, "index.html"));
 });
 
+// F-14 - temporary proxy from the current storefront to the Medusa Store API
+app.get("/medusa-home-products", async (req, res) => {
+  const medusaBackendUrl = process.env.MEDUSA_BACKEND_URL || "http://medusa:9000";
+  const publishableApiKey = process.env.MEDUSA_PUBLISHABLE_API_KEY;
+
+  if (!publishableApiKey) {
+    return res.status(503).json({ error: "catalogue_unavailable" });
+  }
+
+  const medusaHeaders = {
+    "x-publishable-api-key": publishableApiKey,
+  };
+
+  try {
+    const regionsUrl = new URL("/store/regions?limit=1", medusaBackendUrl);
+    const regionsResponse = await fetch(regionsUrl, {
+      headers: medusaHeaders,
+      signal: AbortSignal.timeout(5000),
+    });
+
+    if (!regionsResponse.ok) {
+      throw new Error(`Medusa regions request failed with status ${regionsResponse.status}`);
+    }
+
+    const regionsData = await regionsResponse.json();
+    const regionId = regionsData.regions?.[0]?.id;
+
+    if (!regionId) {
+      throw new Error("No Medusa region is available");
+    }
+
+    const productsUrl = new URL("/store/products", medusaBackendUrl);
+    productsUrl.searchParams.set("limit", "4");
+    productsUrl.searchParams.set("region_id", regionId);
+
+    const productsResponse = await fetch(productsUrl, {
+      headers: medusaHeaders,
+      signal: AbortSignal.timeout(5000),
+    });
+
+    if (!productsResponse.ok) {
+      throw new Error(`Medusa products request failed with status ${productsResponse.status}`);
+    }
+
+    const productsData = await productsResponse.json();
+    const medusaProducts = productsData.products;
+
+    if (!Array.isArray(medusaProducts) || medusaProducts.length !== 4) {
+      throw new Error("The Medusa seed catalogue does not contain exactly four products");
+    }
+
+    const products = medusaProducts.map((product) => {
+      const pricedVariant = product.variants?.find((variant) => variant.calculated_price);
+      const calculatedPrice = pricedVariant?.calculated_price;
+
+      if (!calculatedPrice) {
+        throw new Error(`No calculated price is available for Medusa product ${product.id}`);
+      }
+
+      const sellPrice = Number(calculatedPrice.calculated_amount);
+      const actualPrice = Number(calculatedPrice.original_amount ?? sellPrice);
+      const discount = actualPrice > sellPrice
+        ? Math.round(((actualPrice - sellPrice) / actualPrice) * 100)
+        : 0;
+
+      return {
+        id: product.id,
+        name: product.title,
+        shortDes: product.subtitle || product.description || "",
+        image: product.thumbnail || product.images?.[0]?.url || "/img/no image.png",
+        sellPrice,
+        actualPrice,
+        discount,
+        currencyCode: calculatedPrice.currency_code,
+      };
+    });
+
+    return res.json(products);
+  } catch (error) {
+    console.error("F-14 Medusa catalogue unavailable:", error.message);
+    return res.status(502).json({ error: "catalogue_unavailable" });
+  }
+});
+
 //signup route
 app.get("/signup", (req, res) => {
   res.sendFile(path.join(staticPath, "signup.html"));

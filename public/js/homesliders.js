@@ -28,6 +28,23 @@ const getProducts = async (tag) => {
   return data;
 };
 
+// F-14 - fetch the four Medusa seed products through the temporary Express proxy
+const getMedusaHomeProducts = async () => {
+  const res = await fetch("/medusa-home-products");
+
+  if (!res.ok) {
+    throw new Error("Medusa catalogue is unavailable");
+  }
+
+  const data = await res.json();
+
+  if (!Array.isArray(data) || data.length === 0) {
+    throw new Error("Medusa catalogue is empty");
+  }
+
+  return data;
+};
+
 // create product slider
 const createProductSlider = (data, parent, title) => {
   let slideContainer = document.querySelector(`${parent}`);
@@ -52,16 +69,29 @@ const createCard = (data, parent) => {
   // console.log(data);
   for (let i = 0; i < data.length; i++) {
     if (data[i].id != decodeURI(location.pathname.split("/").pop())) {
+      const image = data[i].image || data[i].images?.[0] || "../img/no image.png";
+      const isEuroPrice = data[i].currencyCode?.toLowerCase() === "eur";
+      const formatPrice = (value) => isEuroPrice
+        ? new Intl.NumberFormat("fr-FR", { style: "currency", currency: "EUR" }).format(Number(value))
+        : `$${value}`;
+      const discount = Number(data[i].discount) || 0;
+      const discountTag = discount > 0
+        ? `<span class="discount-tag">${discount}% off</span>`
+        : "";
+      const actualPrice = discount > 0
+        ? `<span class="actual-price">${formatPrice(data[i].actualPrice)}</span>`
+        : "";
+
       middle += `
             <div class="product-card" onclick="location.href = '/products/${data[i].id}'">
                 <div class="product-image">
-                    <span class="discount-tag">${data[i].discount}% off</span>
-                    <img src="${data[i].images[0]}" class="product-thumb" alt="">
+                    ${discountTag}
+                    <img src="${image}" class="product-thumb" alt="${data[i].name}">
                 </div>
                 <div class="product-info" >
                     <h2 class="product-brand">${data[i].name}</h2>
                     <p class="product-short-des">${data[i].shortDes}</p>
-                    <span class="price">$${data[i].sellPrice}</span> <span class="actual-price">$${data[i].actualPrice}</span>
+                    <span class="price">${formatPrice(data[i].sellPrice)}</span> ${actualPrice}
                 </div>
             </div>
             `;
@@ -74,6 +104,19 @@ const createCard = (data, parent) => {
   } else {
     return start + middle + end;
   }
+};
+
+const showHomeCatalogueState = (parent) => {
+  const slideContainer = document.querySelector(parent);
+
+  slideContainer.innerHTML = `
+    <section class="product">
+      <h2 class="product-category">Catalogue</h2>
+      <div class="product-container">
+        <p class="catalogue-state" role="status">Catalogue temporairement indisponible.</p>
+      </div>
+    </section>
+  `;
 };
 
 const add_product_to_cart_or_wishlist = (type, product) => {

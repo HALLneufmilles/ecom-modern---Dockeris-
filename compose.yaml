@@ -56,6 +56,9 @@ services:
     build:
       context: .
       target: dev
+    environment:
+      MEDUSA_BACKEND_URL: ${MEDUSA_BACKEND_URL:-http://medusa:9000}
+      MEDUSA_PUBLISHABLE_API_KEY: ${MEDUSA_PUBLISHABLE_API_KEY:-}
     ports:
       - 5000:5000
     env_file:

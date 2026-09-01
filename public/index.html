@@ -52,8 +52,9 @@
     <script src="js/homesliders.js"></script>
 
     <script>
-      getProducts("men").then((data) => createProductSlider(data, "#men-tshirt-products", "Men"));
-      getProducts("women").then((data) => createProductSlider(data, "#men-tshirt-products-2", "Women"));
+      getMedusaHomeProducts()
+        .then((data) => createProductSlider(data, "#men-tshirt-products", "Catalogue"))
+        .catch(() => showHomeCatalogueState("#men-tshirt-products"));
     </script>
   </body>
 </html>

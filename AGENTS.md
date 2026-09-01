@@ -183,6 +183,8 @@ Ne pas créer plusieurs documents décrivant la même chose.
 
 ## Rapport final de Codex
 
+Avant tout rapport final concernant des modifications de code, vérifier l'état Git réel et établir la liste des fichiers modifiés à partir de Git (`git status` / diff).
+
 À la fin d'une tâche, indiquer brièvement :
 
 * ce qui a été analysé ;

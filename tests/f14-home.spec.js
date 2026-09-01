@@ -1,53 +1,79 @@
 const { test, expect } = require("@playwright/test");
 
-test("F-14 - l'accueil charge les produits homme et femme", async ({ page }) => {
-  // On attend les deux appels API effectués par la page d'accueil.
-  const menResponsePromise = page.waitForResponse((response) => {
-    const request = response.request();
+test("F-14 - l'accueil charge les quatre produits Medusa sans fallback Firestore", async ({ page }) => {
+  const firestoreHomeRequests = [];
 
-    return (
-      response.url().endsWith("/get-products") &&
+  page.on("request", (request) => {
+    if (
+      request.url().endsWith("/get-products") &&
       request.method() === "POST" &&
-      request.postData()?.includes('"tag":"men"')
-    );
+      (request.postData()?.includes('"tag":"men"') || request.postData()?.includes('"tag":"women"'))
+    ) {
+      firestoreHomeRequests.push(request);
+    }
   });
 
-  const womenResponsePromise = page.waitForResponse((response) => {
-    const request = response.request();
+  const proxyResponsePromise = page.waitForResponse((response) =>
+    response.url().endsWith("/medusa-home-products")
+  );
 
-    return (
-      response.url().endsWith("/get-products") &&
-      request.method() === "POST" &&
-      request.postData()?.includes('"tag":"women"')
-    );
-  });
-
-  // Ouverture de l'accueil.
   await page.goto("/");
 
-  // Récupération des réponses de l'API.
-  const [menResponse, womenResponse] = await Promise.all([menResponsePromise, womenResponsePromise]);
+  const proxyResponse = await proxyResponsePromise;
+  expect(proxyResponse.status()).toBe(200);
 
-  // Express doit répondre correctement.
-  expect(menResponse.status()).toBe(200);
-  expect(womenResponse.status()).toBe(200);
+  const products = await proxyResponse.json();
+  expect(Array.isArray(products)).toBe(true);
+  expect(products).toHaveLength(4);
 
-  // Firestore doit réellement retourner des produits.
-  const menProducts = await menResponse.json();
-  const womenProducts = await womenResponse.json();
+  const catalogue = page.locator("#men-tshirt-products");
+  const cards = catalogue.locator(".product-card");
 
-  expect(Array.isArray(menProducts)).toBe(true);
-  expect(Array.isArray(womenProducts)).toBe(true);
+  await expect(catalogue.locator(".product-category")).toHaveText("Catalogue");
+  await expect(cards).toHaveCount(4);
+  await expect(cards.first().locator(".product-brand")).not.toHaveText("");
+  await expect(cards.first().locator(".product-thumb")).toBeVisible();
 
-  expect(menProducts.length).toBeGreaterThan(0);
-  expect(womenProducts.length).toBeGreaterThan(0);
+  for (const card of await cards.all()) {
+    const price = card.locator(".price");
 
-  // Les produits doivent ensuite être affichés dans la page.
-  await expect(page.locator("#men-tshirt-products .product-category")).toHaveText("Men");
+    await expect(price).toBeVisible();
+    await expect(price).toContainText("€");
 
-  await expect(page.locator("#men-tshirt-products-2 .product-category")).toHaveText("Women");
+    const priceIsInsideCard = await price.evaluate((element) => {
+      const cardRect = element.closest(".product-card").getBoundingClientRect();
+      const priceRect = element.getBoundingClientRect();
 
-  await expect(page.locator("#men-tshirt-products .product-card").first()).toBeVisible();
+      return priceRect.top >= cardRect.top && priceRect.bottom <= cardRect.bottom;
+    });
 
-  await expect(page.locator("#men-tshirt-products-2 .product-card").first()).toBeVisible();
+    expect(priceIsInsideCard).toBe(true);
+  }
+
+  expect(firestoreHomeRequests).toHaveLength(0);
+
+  await page.route("**/medusa-home-products", async (route) => {
+    await route.fulfill({
+      status: 503,
+      contentType: "application/json",
+      body: JSON.stringify({ error: "catalogue_unavailable" }),
+    });
+  });
+  await page.reload();
+  await expect(page.locator("#men-tshirt-products .catalogue-state")).toBeVisible();
+  await expect(page.locator("#men-tshirt-products .product-card")).toHaveCount(0);
+  expect(firestoreHomeRequests).toHaveLength(0);
+
+  await page.unroute("**/medusa-home-products");
+  await page.route("**/medusa-home-products", async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: "[]",
+    });
+  });
+  await page.reload();
+  await expect(page.locator("#men-tshirt-products .catalogue-state")).toBeVisible();
+  await expect(page.locator("#men-tshirt-products .product-card")).toHaveCount(0);
+  expect(firestoreHomeRequests).toHaveLength(0);
 });
