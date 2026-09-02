@@ -122,6 +122,15 @@ Pour chaque tâche :
 8. arrêter et demander si la correction nécessite une décision structurante ;
 9. terminer par un rapport synthétique.
 
+La fiche fonctionnelle ou le fichier initialement visé par une migration ne constitue pas nécessairement une frontière absolue. Rechercher une frontière fonctionnelle stable et testable :
+
+* analyser les dépendances directes de la fonction demandée ;
+* adapter les fonctions directement dépendantes si cela évite deux sources de vérité contradictoires, empêche une régression directement causée par la migration ou maintient un parcours utilisateur cohérent et testable ;
+* ne pas étendre automatiquement la migration à toute la chaîne de dépendances ;
+* s'arrêter et demander une décision lorsqu'une nouvelle décision structurante, un changement important d'architecture, un nouveau domaine fonctionnel majeur ou un changement non déjà décidé concernant notamment l'authentification, le paiement, la commande, le modèle de données ou l'infrastructure devient nécessaire.
+
+Le déroulement attendu est : objectif fonctionnel → analyse des dépendances → adaptations nécessaires → frontière stable → tests → rapport.
+
 ## Tests
 
 Les tests end-to-end existants utilisent Playwright.
