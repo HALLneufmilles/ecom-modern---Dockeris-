@@ -34,6 +34,8 @@ Avant une modification importante, consulter selon le besoin :
 3. `readme.md` pour les commandes et le fonctionnement documenté du projet ;
 4. le code et la configuration réellement présents dans la branche de travail.
 
+`docs/CODEX_PROJECT_BOOTSTRAP_v1.0.md` est un document méthodologique générique et évolutif. Il peut être consulté comme référence, mais ses instructions ne doivent pas être exécutées automatiquement lors des tâches courantes de ce projet. `AGENTS.md` reste la source des instructions opérationnelles actives de ce dépôt. Si Codex identifie une amélioration pertinente à apporter au Bootstrap, il doit la signaler avant toute modification de ce fichier, sauf si la tâche demande explicitement de le modifier.
+
 Si le code, la documentation et les instructions semblent se contredire, ne pas choisir silencieusement une interprétation : signaler le conflit.
 
 ## Avant toute modification
