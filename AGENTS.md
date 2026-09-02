@@ -60,12 +60,16 @@ Codex peut effectuer sans demander une décision préalable, dans le périmètre
 * consulter une quantité raisonnable de logs avec `docker compose logs`, en évitant d'exposer les secrets ;
 * effectuer des vérifications locales de ports ou de processus en lecture seule ;
 * effectuer des requêtes HTTP locales en lecture seule vers les services du projet, par exemple `/health` ou l'interface locale ;
-* lancer les tests existants, notamment `npx playwright test` ;
+* lancer les tests existants avec la commande adaptée à l'environnement d'exécution ;
 * relancer un test après une correction autorisée ;
 * construire une image déjà définie dans le projet lorsque la tâche le demande ;
 * démarrer, arrêter ou redémarrer un service déjà défini dans `compose.yaml` lorsque la tâche le demande explicitement et que cela n'implique aucune suppression de volume ou de données ;
 * analyser les erreurs et logs nécessaires à la tâche ;
 * créer ou modifier les fichiers explicitement concernés par la tâche lorsqu'aucune décision structurante n'est nécessaire.
+
+Les commandes bénéficiant d'une autorisation permanente ciblée doivent être exécutées séparément. Ne pas les regrouper inutilement avec d'autres commandes dans un script PowerShell composé, afin de préserver la correspondance avec la règle d'autorisation ciblée.
+
+Regrouper autant que raisonnablement possible les vérifications non destructives qui nécessitent réellement une approbation, afin d'éviter plusieurs interruptions successives, sans contourner les approbations nécessaires.
 
 Ne pas demander une décision utilisateur simplement parce qu'une action figure dans cette liste.
 
@@ -128,9 +132,15 @@ La boutique testée est disponible sur :
 
 Playwright ne démarre pas lui-même la boutique.
 
-Commande de référence :
+Sous Windows dans l'environnement Codex, ne pas supposer que `npx` est disponible. Pour lancer Playwright depuis Codex, utiliser directement le runtime Node disponible et le CLI Playwright local du projet.
 
-`npx playwright test`
+Les tests Playwright purement locaux peuvent être exécutés sans approbation lorsqu'ils n'ont pas besoin d'accès réseau externe.
+
+Le test legacy `tests/f01-f02-f03-account.spec.js` utilise encore Firebase Admin / Firestore pour son nettoyage. Ses assertions F-01/F-03/F-02 fonctionnent, mais le nettoyage Firestore nécessite actuellement un accès réseau externe depuis le processus Playwright. Cet accès reste soumis à une approbation ponctuelle : ne pas créer de règle permanente pour le contourner.
+
+Commande de référence depuis Codex :
+
+`<runtime-node-direct> .\\node_modules\\playwright\\cli.js test`
 
 La baseline validée après la migration vers Node 22 est de 18 tests réussis sur 18.
 
@@ -146,11 +156,9 @@ Employer une terminologie précise dans les rapports :
 * Docker CLI : commandes `docker ...` ;
 * Docker Compose : orchestration des services définis dans `compose.yaml`.
 
-Pour valider la configuration Compose sans afficher les valeurs des variables d'environnement :
+Pour une simple validation Docker Compose, toujours préférer `docker compose config --quiet`, sans afficher la configuration développée si cela n'est pas indispensable, afin de ne pas exposer les secrets.
 
 `docker compose config --quiet`
-
-Ne pas utiliser la sortie complète de `docker compose config` lorsqu'une simple validation suffit.
 
 ## Sécurité
 
@@ -163,6 +171,15 @@ Ne jamais :
 * supprimer un volume ou des données persistantes sans autorisation ;
 * exécuter `git reset --hard`, `git clean -fd`, un force push ou une commande Git destructive sans autorisation explicite ;
 * supprimer ou recréer une base PostgreSQL sans autorisation explicite.
+
+Ne jamais considérer comme globalement sûrs ni chercher à faire autoriser globalement :
+
+* PowerShell ;
+* `docker compose exec` ;
+* `psql` ;
+* Node ;
+* Playwright ;
+* toute commande pouvant exécuter du code arbitraire ou modifier des données.
 
 Ne pas faire de commit ni de push sauf si la tâche le demande explicitement.
 
@@ -183,7 +200,7 @@ Ne pas créer plusieurs documents décrivant la même chose.
 
 ## Rapport final de Codex
 
-Avant tout rapport final concernant des modifications de code, vérifier l'état Git réel et établir la liste des fichiers modifiés à partir de Git (`git status` / diff).
+Avant tout rapport final concernant une modification du dépôt, vérifier l'état Git réel et établir la liste des fichiers modifiés à partir de Git et du diff (`git status` / `git diff`), et non à partir d'une estimation interne de la session.
 
 À la fin d'une tâche, indiquer brièvement :
 
