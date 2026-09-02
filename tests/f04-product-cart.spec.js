@@ -1,83 +1,108 @@
 const { test, expect } = require("@playwright/test");
 
-test("F-04 - ouvrir un produit, choisir une taille et l'ajouter au panier", async ({ page }) => {
-  // 1. Partir avec un stockage navigateur propre.
-  await page.goto("/");
+test("F-04 - ouvrir un produit Medusa, choisir sa variante et l'ajouter au panier Medusa", async ({ page }) => {
+  const legacyDetailRequests = [];
 
+  page.on("request", (request) => {
+    if (
+      request.url().endsWith("/get-products")
+      && request.method() === "POST"
+      && request.postData()?.includes('"id":')
+    ) {
+      legacyDetailRequests.push(request);
+    }
+  });
+
+  await page.goto("/");
   await page.evaluate(() => {
     localStorage.clear();
     sessionStorage.clear();
+    localStorage.setItem("medusa_cart_id", "cart_missing");
   });
+  await page.reload();
 
-  // 2. Ouvrir une recherche qui contient déjà des produits connus.
-  await page.goto("/search/men");
-
-  const firstProduct = page.locator(".card-container .product-card").first();
-
+  const firstProduct = page.locator("#men-tshirt-products .product-card").first();
   await expect(firstProduct).toBeVisible();
 
-  // 3. Attendre la récupération du produit précis depuis le backend.
-  const productResponsePromise = page.waitForResponse((response) => {
-    const request = response.request();
+  const productName = (await firstProduct.locator(".product-brand").textContent()).trim();
+  const productResponsePromise = page.waitForResponse(
+    (response) => response.url().includes("/medusa-products/") && response.request().method() === "GET"
+  );
 
-    return (
-      response.url().endsWith("/get-products") && request.method() === "POST" && request.postData()?.includes('"id":')
-    );
-  });
-
-  // 4. Ouvrir le premier produit.
   await firstProduct.click();
-
-  await expect(page).toHaveURL(/\/products\/.+/);
+  await expect(page).toHaveURL(/\/products\/prod_.+/);
 
   const productResponse = await productResponsePromise;
-
   expect(productResponse.status()).toBe(200);
 
   const product = await productResponse.json();
+  expect(product.source).toBe("medusa");
+  expect(product.id).toMatch(/^prod_/);
+  expect(product.variants.length).toBeGreaterThan(0);
+  expect(product.options.length).toBeGreaterThan(0);
 
-  // 5. Vérifier que les vraies informations du produit apparaissent.
-  await expect(page.locator(".product-brand")).toHaveText(product.name);
+  await expect(page.locator(".product-brand")).toHaveText(productName);
+  await expect(page.locator(".product-images img:visible").first()).toBeVisible();
+  expect(legacyDetailRequests).toHaveLength(0);
 
-  await expect(page.locator(".product-price")).toContainText(String(product.sellPrice));
-
-  // 6. Choisir la première taille réellement disponible.
-  const availableSize = page.locator(".size-radio-btn:visible").first();
-
-  await expect(availableSize).toBeVisible();
-
-  const selectedSize = (await availableSize.textContent()).trim();
-
-  await availableSize.click();
-
-  await expect(availableSize).toHaveClass(/check/);
-
-  // 7. Ajouter au panier.
   const cartButton = page.locator(".cart-btn");
+  await cartButton.click();
+  await expect(cartButton).toHaveText("add to cart");
+  await expect(page.locator(".option-radio-btn.uncheck").first()).toBeVisible();
+
+  const availableVariant = product.variants.find((variant) => variant.available && variant.price);
+  expect(availableVariant).toBeTruthy();
+
+  for (const selectedOption of availableVariant.options) {
+    const group = page.locator(
+      `.product-option-group[data-option-id="${selectedOption.optionId}"]`
+    );
+    const optionButton = group.locator(".option-radio-btn").filter({
+      hasText: selectedOption.value,
+    });
+
+    await optionButton.click();
+    await expect(optionButton).toHaveClass(/check/);
+  }
+
+  await expect(page.locator(".product-stock")).toHaveText("In stock");
+  await expect(page.locator(".product-price")).not.toHaveText("Price unavailable");
+
+  const cartResponsePromise = page.waitForResponse(
+    (response) => response.url().endsWith("/medusa-cart/items") && response.request().method() === "POST"
+  );
 
   await cartButton.click();
 
+  const cartResponse = await cartResponsePromise;
+  expect(cartResponse.status()).toBe(200);
+
+  const { cart: medusaCart } = await cartResponse.json();
+  expect(medusaCart.id).toMatch(/^cart_/);
+  expect(medusaCart.items.some((item) => item.variant_id === availableVariant.id)).toBe(true);
   await expect(cartButton).toHaveText("added");
 
-  // 8. Vérifier ce qui a réellement été enregistré dans le navigateur.
-  const cart = await page.evaluate(() => JSON.parse(localStorage.getItem("cart")));
+  const storedState = await page.evaluate(() => ({
+    cartId: localStorage.getItem("medusa_cart_id"),
+    legacyCart: localStorage.getItem("cart"),
+  }));
 
-  expect(Array.isArray(cart)).toBe(true);
-  expect(cart).toHaveLength(1);
+  expect(storedState.cartId).toBe(medusaCart.id);
+  expect(storedState.cartId).not.toBe("cart_missing");
+  expect(storedState.legacyCart).toBeNull();
 
-  expect(cart[0].name).toBe(product.name);
-  expect(cart[0].size).toBe(selectedSize);
-  expect(Number(cart[0].item)).toBe(1);
-
-  // 9. Ouvrir réellement le panier.
   await page.goto("/cart");
 
-  // 10. Vérifier que le produit est affiché.
   const cartProduct = page.locator(".cart .sm-product").first();
-
   await expect(cartProduct).toBeVisible();
-
-  await expect(cartProduct.locator(".sm-product-name")).toHaveText(product.name);
-
+  await expect(cartProduct.locator(".sm-product-name")).toHaveText(productName);
   await expect(cartProduct.locator(".item-count")).toHaveText("1");
+  const renderedCart = await page.evaluate(() => window.currentMedusaCart);
+  expect(renderedCart.id).toBe(medusaCart.id);
+  expect(renderedCart.items[0].variant_id).toBe(availableVariant.id);
+
+  if (availableVariant.price.currencyCode?.toLowerCase() === "eur") {
+    await expect(cartProduct.locator(".sm-price")).toContainText("€");
+    await expect(page.locator(".bill")).toContainText("€");
+  }
 });

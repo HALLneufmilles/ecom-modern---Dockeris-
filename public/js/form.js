@@ -46,6 +46,7 @@ submitBtn.addEventListener("click", () => {
         tac: tac.checked,
         notification: notification.checked,
         seller: false,
+        cartId: localStorage.getItem("medusa_cart_id"),
       });
     }
   } else {
@@ -58,6 +59,7 @@ submitBtn.addEventListener("click", () => {
       sendData("/login", {
         email: email.value,
         password: password.value,
+        cartId: localStorage.getItem("medusa_cart_id"),
       });
     }
   }

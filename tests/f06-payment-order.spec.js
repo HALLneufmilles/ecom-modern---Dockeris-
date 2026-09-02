@@ -15,19 +15,7 @@ test("F-06 - payment=done déclenche actuellement un faux succès local", async 
       })
     );
 
-    localStorage.setItem(
-      "cart",
-      JSON.stringify([
-        {
-          item: 1,
-          name: "Produit test paiement",
-          sellPrice: 25,
-          size: "m",
-          shortDes: "Produit utilisé pour F-06",
-          image: "/img/card1.png"
-        }
-      ])
-    );
+    localStorage.setItem("medusa_cart_id", "cart_payment_test");
 
     localStorage.setItem("wishlist", JSON.stringify([]));
   });
@@ -39,8 +27,8 @@ test("F-06 - payment=done déclenche actuellement un faux succès local", async 
   // Le code actuel considère quand même le paiement comme réussi.
   await expect(page.locator(".alert-msg")).toHaveText("order is placed");
 
-  // Le panier est également supprimé localement.
-  const cart = await page.evaluate(() => localStorage.getItem("cart"));
+  // La référence technique du panier est également supprimée localement.
+  const cart = await page.evaluate(() => localStorage.getItem("medusa_cart_id"));
 
   expect(cart).toBeNull();
 });

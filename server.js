@@ -96,51 +96,121 @@ app.get("/", (req, res) => {
   res.sendFile(path.join(staticPath, "index.html"));
 });
 
+const getMedusaStoreConfig = () => ({
+  backendUrl: process.env.MEDUSA_BACKEND_URL || "http://medusa:9000",
+  publishableApiKey: process.env.MEDUSA_PUBLISHABLE_API_KEY,
+});
+
+const fetchMedusaStore = async (pathname, { method = "GET", body, token } = {}) => {
+  const { backendUrl, publishableApiKey } = getMedusaStoreConfig();
+  const url = new URL(pathname, backendUrl);
+  const response = await fetch(url, {
+    method,
+    headers: {
+      "x-publishable-api-key": publishableApiKey,
+      ...(body ? { "Content-Type": "application/json" } : {}),
+      ...(token ? { Authorization: `Bearer ${token}` } : {}),
+    },
+    body: body ? JSON.stringify(body) : undefined,
+    signal: AbortSignal.timeout(5000),
+  });
+
+  const data = await response.json().catch(() => null);
+  if (!response.ok) {
+    const error = new Error(data?.message || `Medusa Store API request failed with status ${response.status}`);
+    error.status = response.status;
+    error.data = data;
+    throw error;
+  }
+
+  return data;
+};
+
+const getDefaultMedusaRegionId = async () => {
+  const data = await fetchMedusaStore("/store/regions?limit=1");
+  const regionId = data?.regions?.[0]?.id;
+
+  if (!regionId) {
+    throw new Error("No Medusa region is available");
+  }
+
+  return regionId;
+};
+
+const getVariantOptionValue = (variantOption) => ({
+  optionId: variantOption.option_id,
+  value: variantOption.value,
+});
+
+const mapMedusaProduct = (product, regionId) => {
+  const productImages = product.images?.map((image) => image.url).filter(Boolean) || [];
+  const variants = (product.variants || []).map((variant) => {
+    const price = variant.calculated_price;
+    const inventoryQuantity = variant.inventory_quantity;
+    const available = variant.manage_inventory === false
+      || variant.allow_backorder === true
+      || Number(inventoryQuantity) > 0;
+
+    return {
+      id: variant.id,
+      title: variant.title,
+      sku: variant.sku,
+      options: (variant.options || []).map(getVariantOptionValue),
+      price: price ? {
+        amount: Number(price.calculated_amount),
+        originalAmount: Number(price.original_amount ?? price.calculated_amount),
+        currencyCode: price.currency_code,
+      } : null,
+      inventoryQuantity,
+      manageInventory: variant.manage_inventory,
+      allowBackorder: variant.allow_backorder,
+      available,
+    };
+  });
+
+  const options = (product.options || []).map((option) => {
+    const directValues = option.values?.map((value) => value.value).filter(Boolean) || [];
+    const values = directValues.length ? directValues : variants.flatMap((variant) => variant.options
+        .filter((variantOption) => variantOption.optionId === option.id)
+        .map((variantOption) => variantOption.value));
+
+    return {
+      id: option.id,
+      title: option.title,
+      values: [...new Set(values.filter(Boolean))],
+    };
+  });
+
+  return {
+    source: "medusa",
+    id: product.id,
+    regionId,
+    name: product.title,
+    shortDes: product.subtitle || product.description || "",
+    des: product.description || "",
+    images: productImages.length ? productImages : [product.thumbnail].filter(Boolean),
+    thumbnail: product.thumbnail,
+    options,
+    variants,
+    tags: (product.tags || []).map((tag) => tag.value).filter(Boolean),
+  };
+};
+
 // F-14 - temporary proxy from the current storefront to the Medusa Store API
 app.get("/medusa-home-products", async (req, res) => {
-  const medusaBackendUrl = process.env.MEDUSA_BACKEND_URL || "http://medusa:9000";
-  const publishableApiKey = process.env.MEDUSA_PUBLISHABLE_API_KEY;
+  const { publishableApiKey } = getMedusaStoreConfig();
 
   if (!publishableApiKey) {
     return res.status(503).json({ error: "catalogue_unavailable" });
   }
 
-  const medusaHeaders = {
-    "x-publishable-api-key": publishableApiKey,
-  };
-
   try {
-    const regionsUrl = new URL("/store/regions?limit=1", medusaBackendUrl);
-    const regionsResponse = await fetch(regionsUrl, {
-      headers: medusaHeaders,
-      signal: AbortSignal.timeout(5000),
-    });
-
-    if (!regionsResponse.ok) {
-      throw new Error(`Medusa regions request failed with status ${regionsResponse.status}`);
-    }
-
-    const regionsData = await regionsResponse.json();
-    const regionId = regionsData.regions?.[0]?.id;
-
-    if (!regionId) {
-      throw new Error("No Medusa region is available");
-    }
-
-    const productsUrl = new URL("/store/products", medusaBackendUrl);
+    const { backendUrl } = getMedusaStoreConfig();
+    const regionId = await getDefaultMedusaRegionId();
+    const productsUrl = new URL("/store/products", backendUrl);
     productsUrl.searchParams.set("limit", "4");
     productsUrl.searchParams.set("region_id", regionId);
-
-    const productsResponse = await fetch(productsUrl, {
-      headers: medusaHeaders,
-      signal: AbortSignal.timeout(5000),
-    });
-
-    if (!productsResponse.ok) {
-      throw new Error(`Medusa products request failed with status ${productsResponse.status}`);
-    }
-
-    const productsData = await productsResponse.json();
+    const productsData = await fetchMedusaStore(productsUrl.pathname + productsUrl.search);
     const medusaProducts = productsData.products;
 
     if (!Array.isArray(medusaProducts) || medusaProducts.length !== 4) {
@@ -180,13 +250,307 @@ app.get("/medusa-home-products", async (req, res) => {
   }
 });
 
+app.get("/medusa-products/:id", async (req, res) => {
+  const { publishableApiKey, backendUrl } = getMedusaStoreConfig();
+
+  if (!publishableApiKey) {
+    return res.status(503).json({ error: "catalogue_unavailable" });
+  }
+
+  try {
+    const regionId = await getDefaultMedusaRegionId();
+    const productUrl = new URL(`/store/products/${encodeURIComponent(req.params.id)}`, backendUrl);
+    productUrl.searchParams.set("region_id", regionId);
+    productUrl.searchParams.set("fields", "*variants.calculated_price,+variants.inventory_quantity");
+
+    const data = await fetchMedusaStore(productUrl.pathname + productUrl.search);
+    return res.json(mapMedusaProduct(data.product, regionId));
+  } catch (error) {
+    console.error("F-04 Medusa product unavailable:", error.message);
+    const status = error.status === 404 ? 404 : 502;
+    return res.status(status).json({ error: status === 404 ? "product_not_found" : "catalogue_unavailable" });
+  }
+});
+
+const createMedusaCart = async (regionId, token) => {
+  const data = await fetchMedusaStore("/store/carts", {
+    method: "POST",
+    body: { region_id: regionId },
+    token,
+  });
+
+  return data.cart;
+};
+
+const MEDUSA_AUTH_COOKIE = "medusa_customer_token";
+
+const readCookie = (req, name) => {
+  const prefix = `${name}=`;
+  const cookie = (req.headers.cookie || "")
+    .split(";")
+    .map((value) => value.trim())
+    .find((value) => value.startsWith(prefix));
+
+  return cookie ? decodeURIComponent(cookie.slice(prefix.length)) : null;
+};
+
+const getMedusaCustomerToken = (req) => readCookie(req, MEDUSA_AUTH_COOKIE);
+
+const setMedusaCustomerCookie = (res, token) => {
+  const secure = process.env.NODE_ENV === "production" ? "; Secure" : "";
+  res.setHeader(
+    "Set-Cookie",
+    `${MEDUSA_AUTH_COOKIE}=${encodeURIComponent(token)}; HttpOnly; SameSite=Lax; Path=/; Max-Age=604800${secure}`
+  );
+};
+
+const clearMedusaCustomerCookie = (res) => {
+  const secure = process.env.NODE_ENV === "production" ? "; Secure" : "";
+  res.setHeader(
+    "Set-Cookie",
+    `${MEDUSA_AUTH_COOKIE}=; HttpOnly; SameSite=Lax; Path=/; Max-Age=0${secure}`
+  );
+};
+
+const retrieveMedusaCart = async (cartId, token) => {
+  const data = await fetchMedusaStore(`/store/carts/${encodeURIComponent(cartId)}`, { token });
+  return data.cart;
+};
+
+const updateMedusaCustomer = async (token, body) => {
+  const data = await fetchMedusaStore("/store/customers/me", {
+    method: "POST",
+    body,
+    token,
+  });
+  return data.customer;
+};
+
+const retrieveMedusaCustomer = async (token) => {
+  const data = await fetchMedusaStore("/store/customers/me", { token });
+  return data.customer;
+};
+
+const transferMedusaCart = async (cartId, token) => {
+  const data = await fetchMedusaStore(`/store/carts/${encodeURIComponent(cartId)}/customer`, {
+    method: "POST",
+    token,
+  });
+  return data.cart;
+};
+
+const findUsableMedusaCart = async (cartId, token) => {
+  if (!cartId) {
+    return null;
+  }
+
+  try {
+    const cart = await retrieveMedusaCart(cartId, token);
+    return cart.completed_at ? null : cart;
+  } catch (error) {
+    if (error.status === 404) {
+      return null;
+    }
+    throw error;
+  }
+};
+
+const mergeMedusaCarts = async (targetCart, sourceCart, token) => {
+  let cart = targetCart;
+
+  for (const item of sourceCart.items || []) {
+    cart = await addMedusaCartItem(cart.id, item.variant_id, Number(item.quantity), token);
+  }
+
+  return cart;
+};
+
+const resolveCustomerCart = async (token, browserCartId) => {
+  const customer = await retrieveMedusaCustomer(token);
+  const customerCartId = typeof customer.metadata?.active_cart_id === "string"
+    ? customer.metadata.active_cart_id
+    : null;
+  let customerCart = await findUsableMedusaCart(customerCartId, token);
+  const browserCart = browserCartId === customerCartId
+    ? customerCart
+    : await findUsableMedusaCart(browserCartId, token);
+
+  if (customerCart && browserCart) {
+    customerCart = await mergeMedusaCarts(customerCart, browserCart, token);
+  } else if (!customerCart && browserCart) {
+    customerCart = browserCart;
+  } else if (!customerCart) {
+    customerCart = await createMedusaCart(await getDefaultMedusaRegionId(), token);
+  }
+
+  customerCart = await transferMedusaCart(customerCart.id, token);
+  await updateMedusaCustomer(token, {
+    metadata: {
+      ...customer.metadata,
+      active_cart_id: customerCart.id,
+    },
+  });
+
+  return { customer, cart: customerCart };
+};
+
+const addMedusaCartItem = async (cartId, variantId, quantity, token) => {
+  const data = await fetchMedusaStore(`/store/carts/${encodeURIComponent(cartId)}/line-items`, {
+    method: "POST",
+    body: { variant_id: variantId, quantity },
+    token,
+  });
+
+  return data.cart;
+};
+
+app.post("/medusa-cart/items", async (req, res) => {
+  const { publishableApiKey } = getMedusaStoreConfig();
+  const { cartId, variantId, quantity = 1 } = req.body;
+  const token = getMedusaCustomerToken(req);
+
+  if (!publishableApiKey) {
+    return res.status(503).json({ error: "cart_unavailable" });
+  }
+
+  if (typeof variantId !== "string" || !Number.isInteger(quantity) || quantity < 1) {
+    return res.status(400).json({ error: "invalid_cart_item" });
+  }
+
+  try {
+    let activeCartId = typeof cartId === "string" && cartId ? cartId : null;
+
+    if (!activeCartId) {
+      activeCartId = (await createMedusaCart(await getDefaultMedusaRegionId(), token)).id;
+    }
+
+    let cart;
+    try {
+      cart = await addMedusaCartItem(activeCartId, variantId, quantity, token);
+    } catch (error) {
+      if (!cartId || error.status !== 404) {
+        throw error;
+      }
+
+      activeCartId = (await createMedusaCart(await getDefaultMedusaRegionId(), token)).id;
+      cart = await addMedusaCartItem(activeCartId, variantId, quantity, token);
+    }
+
+    if (token) {
+      const customer = await retrieveMedusaCustomer(token);
+      await updateMedusaCustomer(token, {
+        metadata: { ...customer.metadata, active_cart_id: cart.id },
+      });
+    }
+
+    return res.json({ cart });
+  } catch (error) {
+    console.error("F-04 Medusa cart unavailable:", error.message);
+    return res.status(502).json({ error: "cart_unavailable" });
+  }
+});
+
+app.get("/medusa-cart/:id", async (req, res) => {
+  try {
+    const cart = await retrieveMedusaCart(req.params.id, getMedusaCustomerToken(req));
+    return res.json({ cart });
+  } catch (error) {
+    const status = error.status === 404 ? 404 : 502;
+    return res.status(status).json({ error: status === 404 ? "cart_not_found" : "cart_unavailable" });
+  }
+});
+
+app.patch("/medusa-cart/:cartId/items/:lineId", async (req, res) => {
+  const quantity = Number(req.body.quantity);
+
+  if (!Number.isInteger(quantity) || quantity < 1) {
+    return res.status(400).json({ error: "invalid_quantity" });
+  }
+
+  try {
+    const data = await fetchMedusaStore(
+      `/store/carts/${encodeURIComponent(req.params.cartId)}/line-items/${encodeURIComponent(req.params.lineId)}`,
+      {
+        method: "POST",
+        body: { quantity },
+        token: getMedusaCustomerToken(req),
+      }
+    );
+    return res.json({ cart: data.cart });
+  } catch (error) {
+    return res.status(error.status === 404 ? 404 : 502).json({ error: "cart_update_failed" });
+  }
+});
+
+app.delete("/medusa-cart/:cartId/items/:lineId", async (req, res) => {
+  try {
+    const data = await fetchMedusaStore(
+      `/store/carts/${encodeURIComponent(req.params.cartId)}/line-items/${encodeURIComponent(req.params.lineId)}`,
+      { method: "DELETE", token: getMedusaCustomerToken(req) }
+    );
+    return res.json({ cart: data.parent });
+  } catch (error) {
+    return res.status(error.status === 404 ? 404 : 502).json({ error: "cart_delete_failed" });
+  }
+});
+
 //signup route
 app.get("/signup", (req, res) => {
   res.sendFile(path.join(staticPath, "signup.html"));
 });
 
-app.post("/signup", (req, res) => {
-  let { name, email, password, number, tac, notification } = req.body;
+const authenticateMedusaCustomer = async (email, password) => {
+  const data = await fetchMedusaStore("/auth/customer/emailpass", {
+    method: "POST",
+    body: { email, password },
+  });
+  return data.token;
+};
+
+const registerMedusaCustomer = async ({ name, email, password, number }) => {
+  const registration = await fetchMedusaStore("/auth/customer/emailpass/register", {
+    method: "POST",
+    body: { email, password },
+  });
+  const [firstName, ...lastNameParts] = name.trim().split(/\s+/);
+
+  await fetchMedusaStore("/store/customers", {
+    method: "POST",
+    token: registration.token,
+    body: {
+      email,
+      first_name: firstName,
+      last_name: lastNameParts.join(" ") || undefined,
+      phone: number,
+    },
+  });
+
+  return authenticateMedusaCustomer(email, password);
+};
+
+const getLegacyAccountState = async (email) => {
+  const [user, saved, seller] = await Promise.all([
+    db.collection("users").doc(email).get(),
+    db.collection("saved").doc(email).get(),
+    db.collection("sellers").doc(email).get(),
+  ]);
+
+  return { user, saved, seller };
+};
+
+const customerResponse = ({ customer, cart, legacy }) => ({
+  name: [customer.first_name, customer.last_name].filter(Boolean).join(" ") || customer.email,
+  email: customer.email,
+  seller: legacy.user.exists ? Boolean(legacy.user.data().seller) : false,
+  tagsSeller: legacy.seller.exists ? legacy.seller.data().tagsSeller : null,
+  wishlist: legacy.saved.exists && Array.isArray(legacy.saved.data().wishlist)
+    ? legacy.saved.data().wishlist
+    : [],
+  cartId: cart.id,
+});
+
+app.post("/signup", async (req, res) => {
+  const { name, email, password, number, tac } = req.body;
 
   // form validations
   if (name.length < 3) {
@@ -203,34 +567,35 @@ app.post("/signup", (req, res) => {
     return res.json({ alert: "you must agree to our terms and conditions" });
   }
 
-  // store user in db
-  db.collection("users")
-    .doc(email)
-    .get()
-    .then((user) => {
-      if (user.exists) {
-        return res.json({ alert: "email already exists" });
-      } else {
-        // encrypt the password before storing it.
-        bcrypt.genSalt(10, (err, salt) => {
-          bcrypt.hash(password, salt, (err, hash) => {
-            req.body.password = hash;
-            db.collection("users")
-              .doc(email)
-              .set(req.body)
-              .then((data) => {
-                res.json({
-                  name: req.body.name,
-                  email: req.body.email,
-                  seller: req.body.seller,
-                  cart: [],
-                  wishlist: [],
-                });
-              });
-          });
-        });
-      }
+  try {
+    const existingUser = await db.collection("users").doc(email).get();
+    if (existingUser.exists) {
+      return res.json({ alert: "email already exists" });
+    }
+
+    const token = await registerMedusaCustomer({ name, email, password, number });
+    const passwordHash = await bcrypt.hash(password, 10);
+    await db.collection("users").doc(email).set({
+      name,
+      email,
+      password: passwordHash,
+      number,
+      tac: true,
+      notification: Boolean(req.body.notification),
+      seller: false,
     });
+
+    const { customer, cart } = await resolveCustomerCart(token, req.body.cartId);
+    const legacy = await getLegacyAccountState(email);
+    setMedusaCustomerCookie(res, token);
+    return res.json(customerResponse({ customer, cart, legacy }));
+  } catch (error) {
+    console.error("Medusa customer registration failed:", error.message);
+    const duplicate = error.status === 400 || error.status === 409;
+    return res.status(duplicate ? 200 : 502).json({
+      alert: duplicate ? "email already exists" : "account service unavailable",
+    });
+  }
 });
 
 // login route
@@ -321,40 +686,52 @@ app.get("/login", (req, res) => {
 //   });
 // });
 
-app.post("/login", (req, res) => {
-  let { email, password } = req.body;
+app.post("/login", async (req, res) => {
+  const { email, password } = req.body;
 
   if (!email.length || !password.length) {
     return res.json({ alert: "fill all the inputs" });
   }
-  const sellerPromise = db.collection("sellers").doc(email).get();
-  const userPromise = db.collection("users").doc(email).get();
-  const savedPromise = db.collection("saved").doc(email).get();
+  try {
+    const legacy = await getLegacyAccountState(email);
+    let token;
 
-  Promise.all([userPromise, savedPromise, sellerPromise]).then(
-    ([user, saved, seller]) => {
-      if (!user.exists) {
+    try {
+      token = await authenticateMedusaCustomer(email, password);
+    } catch (error) {
+      if (error.status !== 401) {
+        throw error;
+      }
+
+      if (!legacy.user.exists || !legacy.user.data().password) {
         return res.json({ alert: "log in email does not exist" });
       }
 
-      bcrypt.compare(password, user.data().password, (err, result) => {
-        if (result) {
-          const data = user.data();
-          const response = {
-            name: data.name,
-            email: data.email,
-            seller: data.seller,
-            tagsSeller: seller.exists ? seller.data().tagsSeller : null,
-            cart: saved.exists ? saved.data().cart : [],
-            wishlist: saved.exists ? saved.data().wishlist : [],
-          };
-          return res.json(response);
-        } else {
-          return res.json({ alert: "password is incorrect" });
-        }
+      const passwordMatches = await bcrypt.compare(password, legacy.user.data().password);
+      if (!passwordMatches) {
+        return res.json({ alert: "password is incorrect" });
+      }
+
+      token = await registerMedusaCustomer({
+        name: legacy.user.data().name,
+        email,
+        password,
+        number: legacy.user.data().number,
       });
     }
-  );
+
+    const { customer, cart } = await resolveCustomerCart(token, req.body.cartId);
+    setMedusaCustomerCookie(res, token);
+    return res.json(customerResponse({ customer, cart, legacy }));
+  } catch (error) {
+    console.error("Medusa customer login failed:", error.message);
+    return res.status(502).json({ alert: "account service unavailable" });
+  }
+});
+
+app.post("/logout", (req, res) => {
+  clearMedusaCustomerCookie(res);
+  return res.json({ success: true });
 });
 
 // seller route
@@ -599,29 +976,14 @@ app.get("/cart", (req, res) => {
   res.sendFile(path.join(staticPath, "cart.html"));
 });
 
-// app.post("/savecart", (req, res) => {
-//   let { email, cart, wishlist, tagsSeller } = req.body;
-//   let docName = email;
-//   let cartSaved = { cart, wishlist };
-//   db.collection("saved")
-//     .doc(docName)
-//     .set(cartSaved)
-//     .then((data) => {
-//       res.json("saved");
-//     })
-//     .catch((err) => {
-//       return res.json("some error occured in save. Try again");
-//     });
-// });
-app.post("/savecart", (req, res) => {
-  const { email, cart, wishlist, tagsSeller } = req.body;
+app.post("/save-user-state", (req, res) => {
+  const { email, wishlist, tagsSeller } = req.body;
   const docName = email;
-  const cartSaved = { cart, wishlist };
+  const savedState = { wishlist: Array.isArray(wishlist) ? wishlist : [] };
 
   const promises = [];
 
-  // Mise à jour de la collection "saved"
-  promises.push(db.collection("saved").doc(docName).set(cartSaved));
+  promises.push(db.collection("saved").doc(docName).set(savedState));
 
   // Mise à jour de la collection "sellers"
   if (tagsSeller) {
@@ -638,22 +1000,6 @@ app.post("/savecart", (req, res) => {
     .catch((err) => {
       console.error(err);
       res.json("some error occurred in save. Try again");
-    });
-});
-
-app.post("/getcartsaved", (req, res) => {
-  let { email } = req.body;
-  let docName = email;
-  db.collection("saved")
-    .doc(docName)
-    .get()
-    .then((doc) => {
-      if (doc.exists) {
-        const data = doc.data();
-        return res.json(data);
-      } else {
-        return res.json("no products saved");
-      }
     });
 });
 
@@ -685,9 +1031,33 @@ let DOMAIN = process.env.DOMAIN;
 
 // On prépare une requete sever pour qu'il demande une url de paiement à stripe. Pour ça, il faut communiquer à stripe ce dont il à besoin
 app.post("/stripe-checkout", async (req, res) => {
-  // console.log(`req.body : `, req.body);
-  // ouverture d'une session stripe
-  const session = await stripeGateway.checkout.sessions.create({
+  try {
+    const cart = await retrieveMedusaCart(req.body.cartId, getMedusaCustomerToken(req));
+    if (!cart.items?.length) {
+      return res.status(400).json({ error: "empty_cart" });
+    }
+
+    const orderItems = cart.items.map((item) => ({
+      lineId: item.id,
+      variantId: item.variant_id,
+      item: Number(item.quantity),
+      name: item.product_title || item.title,
+      shortDes: item.variant_title || item.subtitle || "",
+      image: item.thumbnail,
+      sellPrice: Number(item.unit_price),
+      currencyCode: cart.currency_code,
+    }));
+
+    const order = {
+      email: req.body.email,
+      address: req.body.address,
+      cartId: cart.id,
+      items: orderItems,
+      total: Number(cart.total || 0),
+      currencyCode: cart.currency_code,
+    };
+
+    const session = await stripeGateway.checkout.sessions.create({
     // strip à besoin de parametres :
     payment_method_types: ["card"], // la méthode de payment ( je croix que la carte est paramétrer par défaut donc peut-etre pas nécéssaire)
     // le mode
@@ -697,7 +1067,7 @@ app.post("/stripe-checkout", async (req, res) => {
     // en lui passant en parametre, cad après le signe "?" 'session_id' et 'order' pour que lorsque le navigateur ateindra ce end-point,
     // une fetch est executer automatiquement pour enregistrer l'achat dans la base de données 'firebase', voir : stripe payment 4.
     success_url: `${DOMAIN}/success?session_id={CHECKOUT_SESSION_ID}&order=${encodeURIComponent(
-      JSON.stringify(req.body)
+      JSON.stringify(order)
     )}`,
     // même chose en cas d'annulation de la commande par l'utilisateur ( sur la page stripe il y à une flache "retour" vers la gauche pour annuler le paiement)
     cancel_url: `${DOMAIN}/checkout?payment_fail=true`,
@@ -705,23 +1075,26 @@ app.post("/stripe-checkout", async (req, res) => {
     // qui est lui même un tableau d'objet.(ex: cart: [{"item":"2","name":"Porte-manteau gros plan jpeg"…st-3.amazonaws.com/89416347401679846304030.jpg"}] )
     // les items sont transmis par la fetch POST "/stripe-checkout" de checkout.js
 
-    line_items: req.body.items.map((item) => {
+    line_items: cart.items.map((item) => {
       return {
         price_data: {
-          currency: "usd",
+          currency: cart.currency_code,
           product_data: {
-            name: item.name,
-            description: item.shortDes,
-            images: [item.image],
+            name: item.product_title || item.title,
+            description: item.variant_title || item.subtitle || undefined,
+            images: item.thumbnail ? [item.thumbnail] : [],
           },
-          unit_amount: item.sellPrice * 100,
+          unit_amount: Number(item.unit_price) * 100,
         },
-        quantity: item.item,
+        quantity: Number(item.quantity),
       };
     }),
-  });
-  // en réponse on demande au server de nous retourner l'url que lui à envoyée 'stripe'.
-  res.json(session.url);
+    });
+    return res.json(session.url);
+  } catch (error) {
+    console.error("Stripe checkout cart preparation failed:", error.message);
+    return res.status(502).json({ error: "checkout_unavailable" });
+  }
 });
 
 // stripe payment 4

@@ -5,9 +5,7 @@ window.addEventListener("load", () => {
   }
 
   if (location.search.includes("payment=done")) {
-    let items = [];
-    localStorage.setItem("cart", JSON.stringify(items));
-    delete localStorage.cart;
+    localStorage.removeItem("medusa_cart_id");
     showAlert("order is placed", "success");
   }
 
@@ -18,18 +16,23 @@ window.addEventListener("load", () => {
 let validateForm = false;
 
 const placeOrderBtn = document.querySelector(".place-order-btn");
-placeOrderBtn.addEventListener("click", () => {
+placeOrderBtn.addEventListener("click", async () => {
   let address = getAddress();
   // console.log(`validateForm : `, validateForm);
 
   if (validateForm) {
+    const cart = await window.medusaCartReady;
+    if (!cart?.id || !cart.items?.length) {
+      showAlert("your cart is empty");
+      return;
+    }
+
     fetch("/stripe-checkout", {
       method: "post",
       headers: new Headers({ "Content-Type": "application/json" }),
       // on stringify le tout
       body: JSON.stringify({
-        // on récupère 'cart' en JSON
-        items: JSON.parse(localStorage.getItem("cart")),
+        cartId: cart.id,
         // on récupère l'adresse
         address: address,
         // on récupère l'email en JSON
@@ -46,28 +49,6 @@ placeOrderBtn.addEventListener("click", () => {
       .catch((err) => console.log(err));
   }
 });
-
-// if (address) {
-//   fetch("/order", {
-//     method: "post",
-//     headers: new Headers({ "Content-Type": "application/json" }),
-//     body: JSON.stringify({
-//       order: JSON.parse(localStorage.cart),
-//       email: JSON.parse(sessionStorage.user).email,
-//       add: address,
-//     }),
-//   })
-//     .then((res) => res.json())
-//     .then((data) => {
-//       if (data.alert == "your order is placed") {
-//         delete localStorage.cart;
-//         showAlert(data.alert, "success");
-//       } else {
-//         showAlert(data.alert);
-//       }
-//     });
-// }
-// });
 
 const getAddress = () => {
   // validation

@@ -31,6 +31,22 @@ test("F-01 / F-02 / F-03 - inscription, déconnexion et reconnexion", async ({ p
   const password = "Baseline123!";
 
   try {
+    await page.goto("/");
+    const initialCart = await page.evaluate(async () => {
+      localStorage.clear();
+      sessionStorage.clear();
+      const products = await fetch("/medusa-home-products").then((response) => response.json());
+      const product = await fetch(`/medusa-products/${products[0].id}`).then((response) => response.json());
+      const variant = product.variants.find((item) => item.available && item.price);
+      const { cart } = await fetch("/medusa-cart/items", {
+        method: "POST",
+        headers: new Headers({ "Content-Type": "application/json" }),
+        body: JSON.stringify({ variantId: variant.id, quantity: 1 }),
+      }).then((response) => response.json());
+      localStorage.setItem("medusa_cart_id", cart.id);
+      return { id: cart.id, variantId: variant.id };
+    });
+
     // ---------------------------------
     // F-01 - INSCRIPTION
     // ---------------------------------
@@ -55,6 +71,8 @@ test("F-01 / F-02 / F-03 - inscription, déconnexion et reconnexion", async ({ p
     expect(user).not.toBeNull();
     expect(user.email).toBe(email);
     expect(user.name).toBe("Playwright Test");
+    expect(await page.evaluate(() => localStorage.getItem("medusa_cart_id"))).toBe(initialCart.id);
+    expect(await page.evaluate(() => localStorage.getItem("cart"))).toBeNull();
 
     // ---------------------------------
     // F-03 - DÉCONNEXION
@@ -74,16 +92,21 @@ test("F-01 / F-02 / F-03 - inscription, déconnexion et reconnexion", async ({ p
 
     // expect(user).toBeNull();
 
-    const saveCartResponsePromise = page.waitForResponse((response) => {
-      return response.url().endsWith("/savecart") && response.request().method() === "POST";
+    const saveStateResponsePromise = page.waitForResponse((response) => {
+      return response.url().endsWith("/save-user-state") && response.request().method() === "POST";
     });
+    const logoutResponsePromise = page.waitForResponse((response) => (
+      response.url().endsWith("/logout") && response.request().method() === "POST"
+    ));
 
     await userButton.click();
 
     // La déconnexion sauvegarde d'abord les données.
-    const saveCartResponse = await saveCartResponsePromise;
+    const saveStateResponse = await saveStateResponsePromise;
+    const logoutResponse = await logoutResponsePromise;
 
-    expect(saveCartResponse.status()).toBe(200);
+    expect(saveStateResponse.status()).toBe(200);
+    expect(logoutResponse.status()).toBe(200);
 
     // Après location.replace("/"), la nouvelle page doit considérer
     // l'utilisateur comme déconnecté.
@@ -93,6 +116,7 @@ test("F-01 / F-02 / F-03 - inscription, déconnexion et reconnexion", async ({ p
     user = await page.evaluate(() => sessionStorage.getItem("user"));
 
     expect(user).toBeNull();
+    expect(await page.evaluate(() => localStorage.getItem("medusa_cart_id"))).toBeNull();
 
     // ---------------------------------
     // F-02 - CONNEXION
@@ -112,6 +136,16 @@ test("F-01 / F-02 / F-03 - inscription, déconnexion et reconnexion", async ({ p
     expect(user).not.toBeNull();
     expect(user.email).toBe(email);
     expect(user.name).toBe("Playwright Test");
+
+    const restoredCartId = await page.evaluate(() => localStorage.getItem("medusa_cart_id"));
+    expect(restoredCartId).toBe(initialCart.id);
+    const restoredCart = await page.evaluate(async (cartId) => {
+      const response = await fetch(`/medusa-cart/${cartId}`);
+      return (await response.json()).cart;
+    }, restoredCartId);
+    expect(restoredCart.items).toHaveLength(1);
+    expect(restoredCart.items[0].variant_id).toBe(initialCart.variantId);
+    expect(await page.evaluate(() => localStorage.getItem("cart"))).toBeNull();
   } finally {
     // Nettoyage systématique des données du compte de test.
     await Promise.all([

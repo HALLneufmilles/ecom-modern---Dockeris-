@@ -1,95 +1,161 @@
-// create small product cards
-const createSmallCards = (data) => {
-  return `
-    <div class="sm-product">
-        <img src="${data.image}" class="sm-product-img" alt="">
-        <div class="sm-text">
-            <p class="sm-product-name">${data.name}</p>
-            <p class="sm-des">${data.shortDes}</p>
-        </div>
-        <div class="item-counter">
-            <button class="counter-btn decrement">-</button>
-            <p class="item-count">${data.item}</p>
-            <button class="counter-btn increment">+</button>
-        </div>
-        <p class="sm-price" data-price="${data.sellPrice}">$${data.sellPrice * data.item}</p>
-        <button class="sm-delete-btn"><img src="img/close.png" alt=""></button>
-    </div>
-    `;
-};
+const formatCartPrice = (amount, currencyCode) => {
+  const currency = currencyCode?.toUpperCase();
 
-let totalBill = 0;
-
-const setProducts = (name) => {
-  const element = document.querySelector(`.${name}`);
-  let data = JSON.parse(localStorage.getItem(name));
-  if (data.length === 0) {
-    element.innerHTML = `<img src="img/empty-cart.png" class="empty-img" alt="">`;
-  } else {
-    for (let i = 0; i < data.length; i++) {
-      element.innerHTML += createSmallCards(data[i]);
-      if (name == "cart") {
-        totalBill += Number(data[i].sellPrice * data[i].item);
-      }
-      updateBill();
-    }
+  if (currency) {
+    return new Intl.NumberFormat("fr-FR", { style: "currency", currency }).format(Number(amount));
   }
 
-  setupEvents(name);
+  return `$${Number(amount).toFixed(2)}`;
 };
 
-const updateBill = () => {
-  let billPrice = document.querySelector(".bill");
-  billPrice.innerHTML = `$${totalBill.toFixed(2)}`;
+const createSmallCard = (item, { mutable = false } = {}) => `
+  <div class="sm-product"${item.lineId ? ` data-line-id="${item.lineId}"` : ""}>
+    <img src="${item.image || "img/no image.png"}" class="sm-product-img" alt="">
+    <div class="sm-text">
+      <p class="sm-product-name">${item.name || "Product"}</p>
+      <p class="sm-des">${item.shortDes || ""}</p>
+    </div>
+    <div class="item-counter">
+      <button class="counter-btn decrement"${mutable ? "" : " disabled"}>-</button>
+      <p class="item-count">${item.quantity}</p>
+      <button class="counter-btn increment"${mutable ? "" : " disabled"}>+</button>
+    </div>
+    <p class="sm-price">${formatCartPrice(item.unitPrice * item.quantity, item.currencyCode)}</p>
+    <button class="sm-delete-btn"><img src="img/close.png" alt=""></button>
+  </div>
+`;
+
+const normalizeMedusaItem = (item, currencyCode) => ({
+  lineId: item.id,
+  name: item.product_title || item.title,
+  shortDes: item.variant_title || item.subtitle || "",
+  image: item.thumbnail,
+  quantity: Number(item.quantity),
+  unitPrice: Number(item.unit_price),
+  currencyCode,
+});
+
+const emptyList = (element) => {
+  element.innerHTML = `<img src="img/empty-cart.png" class="empty-img" alt="">`;
 };
 
-const setupEvents = (name) => {
-  // setup counter event
-  const counterMinus = document.querySelectorAll(`.${name} .decrement`);
-  const counterPlus = document.querySelectorAll(`.${name} .increment`);
-  const counts = document.querySelectorAll(`.${name} .item-count`);
-  const price = document.querySelectorAll(`.${name} .sm-price`);
-  const deleteBtn = document.querySelectorAll(`.${name} .sm-delete-btn`);
+const requestCart = async (path, options) => {
+  const response = await fetch(path, options);
+  const data = await response.json();
 
-  let product = JSON.parse(localStorage.getItem(name));
+  if (!response.ok || !data.cart) {
+    const error = new Error(data.error || "Cart is unavailable");
+    error.status = response.status;
+    throw error;
+  }
 
-  counts.forEach((item, i) => {
-    let cost = Number(price[i].getAttribute("data-price"));
+  return data.cart;
+};
 
-    counterMinus[i].addEventListener("click", () => {
-      if (item.innerHTML > 1) {
-        item.innerHTML--;
-        totalBill -= cost;
-        price[i].innerHTML = `$${item.innerHTML * cost}`;
-        if (name == "cart") {
-          updateBill();
-        }
-        product[i].item = item.innerHTML;
-        localStorage.setItem(name, JSON.stringify(product));
-      }
-    });
-    counterPlus[i].addEventListener("click", () => {
-      if (item.innerHTML < 9) {
-        item.innerHTML++;
-        totalBill += cost;
-        price[i].innerHTML = `$${item.innerHTML * cost}`;
-        if (name == "cart") {
-          updateBill();
-        }
-        product[i].item = item.innerHTML;
-        localStorage.setItem(name, JSON.stringify(product));
-      }
-    });
+const renderCart = (cart) => {
+  const element = document.querySelector(".cart");
+  const items = (cart.items || []).map((item) => normalizeMedusaItem(item, cart.currency_code));
+
+  element.innerHTML = "";
+  if (!items.length) {
+    emptyList(element);
+  } else {
+    items.forEach((item) => element.insertAdjacentHTML("beforeend", createSmallCard(item, { mutable: true })));
+  }
+
+  document.querySelector(".bill").textContent = formatCartPrice(Number(cart.total || 0), cart.currency_code);
+  bindCartEvents(cart.id);
+  window.currentMedusaCart = cart;
+  return cart;
+};
+
+const mutateCartItem = async (cartId, lineId, method, quantity) => {
+  const card = document.querySelector(`.sm-product[data-line-id="${lineId}"]`);
+  card?.querySelectorAll("button").forEach((button) => {
+    button.disabled = true;
   });
 
-  deleteBtn.forEach((item, i) => {
-    item.addEventListener("click", () => {
-      product = product.filter((data, index) => index != i);
-      localStorage.setItem(name, JSON.stringify(product));
-      location.reload();
+  try {
+    const cart = await requestCart(`/medusa-cart/${encodeURIComponent(cartId)}/items/${encodeURIComponent(lineId)}`, {
+      method,
+      headers: quantity ? new Headers({ "Content-Type": "application/json" }) : undefined,
+      body: quantity ? JSON.stringify({ quantity }) : undefined,
+    });
+    renderCart(cart);
+  } catch (error) {
+    card?.querySelectorAll("button").forEach((button) => {
+      button.disabled = false;
+    });
+  }
+};
+
+const bindCartEvents = (cartId) => {
+  document.querySelectorAll(".cart .sm-product").forEach((card) => {
+    const lineId = card.dataset.lineId;
+    const count = card.querySelector(".item-count");
+    const quantity = () => Number(count.textContent);
+
+    card.querySelector(".decrement").addEventListener("click", () => {
+      if (quantity() > 1) mutateCartItem(cartId, lineId, "PATCH", quantity() - 1);
+    });
+    card.querySelector(".increment").addEventListener("click", () => {
+      if (quantity() < 9) mutateCartItem(cartId, lineId, "PATCH", quantity() + 1);
+    });
+    card.querySelector(".sm-delete-btn").addEventListener("click", () => {
+      mutateCartItem(cartId, lineId, "DELETE");
     });
   });
 };
 
-setProducts("cart");
-setProducts("wishlist");
+const loadMedusaCart = async () => {
+  const cartId = localStorage.getItem("medusa_cart_id");
+  const element = document.querySelector(".cart");
+
+  if (!cartId) {
+    emptyList(element);
+    document.querySelector(".bill").textContent = "$0.00";
+    window.currentMedusaCart = null;
+    return null;
+  }
+
+  try {
+    return renderCart(await requestCart(`/medusa-cart/${encodeURIComponent(cartId)}`));
+  } catch (error) {
+    if (error.status === 404) localStorage.removeItem("medusa_cart_id");
+    emptyList(element);
+    document.querySelector(".bill").textContent = "$0.00";
+    window.currentMedusaCart = null;
+    return null;
+  }
+};
+
+const renderWishlist = () => {
+  const element = document.querySelector(".wishlist");
+  if (!element) return;
+
+  let wishlist = JSON.parse(localStorage.getItem("wishlist") || "[]");
+  element.innerHTML = "";
+  if (!wishlist.length) {
+    emptyList(element);
+    return;
+  }
+
+  wishlist.forEach((item, index) => {
+    element.insertAdjacentHTML("beforeend", createSmallCard({
+      name: item.name,
+      shortDes: item.shortDes,
+      image: item.image,
+      quantity: Number(item.item),
+      unitPrice: Number(item.sellPrice),
+      currencyCode: item.currencyCode,
+    }));
+    element.lastElementChild.querySelector(".sm-delete-btn").addEventListener("click", () => {
+      wishlist = wishlist.filter((entry, itemIndex) => itemIndex !== index);
+      localStorage.setItem("wishlist", JSON.stringify(wishlist));
+      renderWishlist();
+    });
+  });
+};
+
+window.medusaCartReady = loadMedusaCart();
+renderWishlist();

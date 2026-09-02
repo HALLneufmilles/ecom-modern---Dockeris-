@@ -57,68 +57,36 @@ window.addEventListener("click", (event) => {
   userPopup.classList.add("hide");
 });
 
-// window.onload = () => {
-//   let user = JSON.parse(sessionStorage.user || null);
-//   if (user != null) {
-//     // means user is logged in
-//     popuptext.innerHTML = `log in as, ${user.name}`;
-//     actionBtn.innerHTML = "log out";
-//     actionBtn.addEventListener("click", () => {
-//       fetch("/savecart", {
-//         method: "post",
-//         headers: new Headers({ "Content-Type": "application/json" }),
-//         body: JSON.stringify({
-//           cart: localStorage.cart ? JSON.parse(localStorage.cart) : null,
-//           wishlist: localStorage.wishlist ? JSON.parse(localStorage.wishlist) : null,
-//           email: JSON.parse(sessionStorage.user).email,
-//           tagsSeller: JSON.parse(sessionStorage.user).tagsSeller,
-//         }),
-//       })
-//         .then((res) => res.json())
-//         .then((data) => {
-//           // console.log(data);
-//           sessionStorage.clear();
-//           localStorage.clear();
-//           location.replace("/");
-//         });
-//     });
-//   } else {
-//     // user is logged out
-//     popuptext.innerHTML = "log in to place order";
-//     actionBtn.innerHTML = "log in";
-//     actionBtn.addEventListener("click", () => {
-//       location.href = "/login";
-//     });
-//   }
-// };
-
 window.onload = () => {
   let user = JSON.parse(sessionStorage.user || null);
   if (user != null) {
     // means user is logged in
     popuptext.innerHTML = `log in as, ${user.name}`;
     actionBtn.innerHTML = "log out";
-    actionBtn.addEventListener("click", () => {
+    actionBtn.addEventListener("click", async () => {
       const dataToSend = {
-        cart: localStorage.cart ? JSON.parse(localStorage.cart) : null,
         wishlist: localStorage.wishlist ? JSON.parse(localStorage.wishlist) : null,
         email: JSON.parse(sessionStorage.user).email,
       };
       if (JSON.parse(sessionStorage.user).seller) {
         dataToSend.tagsSeller = JSON.parse(sessionStorage.user).tagsSeller;
       }
-      fetch("/savecart", {
-        method: "post",
-        headers: new Headers({ "Content-Type": "application/json" }),
-        body: JSON.stringify(dataToSend),
-      })
-        .then((res) => res.json())
-        .then((data) => {
-          // console.log(data);
+      actionBtn.disabled = true;
+      try {
+        await fetch("/save-user-state", {
+          method: "POST",
+          headers: new Headers({ "Content-Type": "application/json" }),
+          body: JSON.stringify(dataToSend),
+        });
+      } finally {
+        try {
+          await fetch("/logout", { method: "POST" });
+        } finally {
           sessionStorage.clear();
           localStorage.clear();
           location.replace("/");
-        });
+        }
+      }
     });
   } else {
     // user is logged out

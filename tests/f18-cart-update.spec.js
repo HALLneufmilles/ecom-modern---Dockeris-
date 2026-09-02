@@ -1,79 +1,74 @@
 const { test, expect } = require("@playwright/test");
 
-test("F-18 - modifier la quantité puis supprimer un produit du panier", async ({ page }) => {
-  // 1. Partir d'un navigateur propre.
+test("F-18 - modifier puis supprimer une ligne du Cart Medusa", async ({ page }) => {
   await page.goto("/");
-
   await page.evaluate(() => {
     localStorage.clear();
     sessionStorage.clear();
   });
+  await page.reload();
 
-  // 2. Trouver un vrai produit.
-  await page.goto("/search/men");
-
-  const firstProduct = page.locator(".card-container .product-card").first();
-
+  const firstProduct = page.locator("#men-tshirt-products .product-card").first();
   await expect(firstProduct).toBeVisible();
-
+  const productResponsePromise = page.waitForResponse((response) => (
+    response.url().includes("/medusa-products/") && response.status() === 200
+  ));
   await firstProduct.click();
+  await expect(page).toHaveURL(/\/products\/prod_.+/);
 
-  await expect(page).toHaveURL(/\/products\/.+/);
+  const productResponse = await productResponsePromise;
+  const product = await productResponse.json();
+  const variant = product.variants.find((item) => item.available && item.price);
 
-  // 3. Attendre que la fiche soit réellement chargée.
-  await expect(page.locator(".product-details .product-brand")).not.toHaveText("");
+  for (const option of variant.options) {
+    await page.locator(`.product-option-group[data-option-id="${option.optionId}"] .option-radio-btn`, {
+      hasText: option.value,
+    }).click();
+  }
 
-  // 4. Choisir une taille disponible.
-  const availableSize = page.locator(".size-radio-btn:visible").first();
-
-  await availableSize.click();
-
-  // 5. Ajouter le produit au panier.
   await page.locator(".cart-btn").click();
-
   await expect(page.locator(".cart-btn")).toHaveText("added");
-
-  // 6. Ouvrir le panier.
   await page.goto("/cart");
 
   const cartProduct = page.locator(".cart .sm-product").first();
-
   await expect(cartProduct).toBeVisible();
+  const lineId = await cartProduct.getAttribute("data-line-id");
+  const cartId = await page.evaluate(() => localStorage.getItem("medusa_cart_id"));
+  expect(lineId).toMatch(/^cali_/);
+  expect(cartId).toMatch(/^cart_/);
 
-  const count = cartProduct.locator(".item-count");
-  const increment = cartProduct.locator(".increment");
-  const decrement = cartProduct.locator(".decrement");
+  const incrementResponsePromise = page.waitForResponse((response) => (
+    response.url().includes(`/medusa-cart/${cartId}/items/${lineId}`)
+    && response.request().method() === "PATCH"
+  ));
+  await cartProduct.locator(".increment").click();
+  const incrementResponse = await incrementResponsePromise;
+  expect(incrementResponse.status()).toBe(200);
+  expect((await incrementResponse.json()).cart.items[0].quantity).toBe(2);
+  await expect(page.locator(`[data-line-id="${lineId}"] .item-count`)).toHaveText("2");
 
-  // État initial.
-  await expect(count).toHaveText("1");
+  const decrementResponsePromise = page.waitForResponse((response) => (
+    response.url().includes(`/medusa-cart/${cartId}/items/${lineId}`)
+    && response.request().method() === "PATCH"
+  ));
+  await page.locator(`[data-line-id="${lineId}"] .decrement`).click();
+  const decrementResponse = await decrementResponsePromise;
+  expect((await decrementResponse.json()).cart.items[0].quantity).toBe(1);
+  await expect(page.locator(`[data-line-id="${lineId}"] .item-count`)).toHaveText("1");
 
-  // 7. Augmenter la quantité.
-  await increment.click();
-
-  await expect(count).toHaveText("2");
-
-  let cart = await page.evaluate(() => JSON.parse(localStorage.getItem("cart")));
-
-  expect(Number(cart[0].item)).toBe(2);
-
-  // 8. Redescendre à 1.
-  await decrement.click();
-
-  await expect(count).toHaveText("1");
-
-  cart = await page.evaluate(() => JSON.parse(localStorage.getItem("cart")));
-
-  expect(Number(cart[0].item)).toBe(1);
-
-  // 9. Supprimer le produit.
-  await cartProduct.locator(".sm-delete-btn").click();
-
-  // La suppression modifie localStorage puis recharge la page.
-  await page.waitForFunction(() => {
-    const cart = JSON.parse(localStorage.getItem("cart"));
-    return Array.isArray(cart) && cart.length === 0;
-  });
-
-  // 10. Vérifier que le panier est maintenant vide.
+  const deleteResponsePromise = page.waitForResponse((response) => (
+    response.url().includes(`/medusa-cart/${cartId}/items/${lineId}`)
+    && response.request().method() === "DELETE"
+  ));
+  await page.locator(`[data-line-id="${lineId}"] .sm-delete-btn`).click();
+  const deleteResponse = await deleteResponsePromise;
+  expect(deleteResponse.status()).toBe(200);
+  expect((await deleteResponse.json()).cart.items).toHaveLength(0);
   await expect(page.locator(".cart .sm-product")).toHaveCount(0);
+  expect(await page.evaluate(() => localStorage.getItem("cart"))).toBeNull();
+
+  await page.evaluate(() => localStorage.setItem("medusa_cart_id", "cart_missing"));
+  await page.reload();
+  await expect(page.locator(".cart .sm-product")).toHaveCount(0);
+  expect(await page.evaluate(() => localStorage.getItem("medusa_cart_id"))).toBeNull();
 });

@@ -5,7 +5,6 @@ test("F-17 - ajouter un produit à la wishlist et l'afficher", async ({ page }) 
   await page.goto("/");
 
   await page.evaluate(() => {
-    localStorage.setItem("cart", JSON.stringify([]));
     localStorage.setItem("wishlist", JSON.stringify([]));
     sessionStorage.clear();
   });

@@ -119,22 +119,26 @@ const showHomeCatalogueState = (parent) => {
   `;
 };
 
-const add_product_to_cart_or_wishlist = (type, product) => {
-  let data = JSON.parse(localStorage.getItem(type));
+const addProductToWishlist = (product, selection = {}) => {
+  let data = JSON.parse(localStorage.getItem("wishlist"));
   if (data == null) {
     data = [];
   }
 
   product = {
     item: 1,
+    productId: product.id,
+    variantId: selection.variantId || null,
     name: product.name,
-    sellPrice: product.sellPrice,
-    size: size || null,
+    sellPrice: selection.sellPrice ?? product.sellPrice,
+    size: selection.size || null,
+    color: selection.color || null,
     shortDes: product.shortDes,
-    image: product.images[0],
+    image: product.images?.[0] || product.image,
+    currencyCode: selection.currencyCode || product.currencyCode || null,
   };
 
   data.push(product);
-  localStorage.setItem(type, JSON.stringify(data));
+  localStorage.setItem("wishlist", JSON.stringify(data));
   return "added";
 };
