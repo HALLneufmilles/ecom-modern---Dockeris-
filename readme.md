@@ -21,10 +21,30 @@ Le projet contient actuellement quatre **services Docker Compose** :
 
 Redis sera ajouté plus tard si le projet en a besoin.
 
-Pour le proxy temporaire F-14 entre `server-dev` et la Store API Medusa, l'environnement local de `server-dev` doit définir les variables suivantes :
+Pour le proxy entre `server-dev` et la Store API Medusa, l'environnement local de `server-dev` doit définir les variables suivantes :
 
 - `MEDUSA_BACKEND_URL`
 - `MEDUSA_PUBLISHABLE_API_KEY`
+- `stripe_key` avec la clé secrète Stripe de test transmise uniquement au backend Medusa
+- `STOREFRONT_URL` avec l'origine publique de la boutique (par défaut `http://127.0.0.1:5000` en développement)
+- `STRIPE_WEBHOOK_SECRET` avec le secret de signature fourni par Stripe pour le webhook Checkout
+
+`STRIPE_PUBLISHABLE_KEY` reste temporairement utilisée par l'ancien parcours Stripe Elements pendant la migration. Le nouveau parcours actif utilise Stripe Checkout hébergé : le bouton `Place Order` demande au serveur de relire le Cart Medusa, crée une Payment Session avec le provider `pp_stripe-checkout_stripe-checkout`, puis redirige vers l'URL Stripe renvoyée par ce provider.
+
+Le webhook Stripe public doit viser :
+
+```text
+<STOREFRONT_URL>/stripe-checkout/webhook
+```
+
+Événements à sélectionner dans Stripe :
+
+- `checkout.session.completed`
+- `checkout.session.async_payment_succeeded`
+- `checkout.session.async_payment_failed`
+- `checkout.session.expired`
+
+La première version propose uniquement la carte bancaire et Link facultatif. La confirmation signée reçue par le webhook est transmise au provider Medusa, qui synchronise le paiement et permet à Medusa de finaliser le Cart de manière idempotente. La page `/stripe-checkout/return` attend ensuite l'Order liée au Cart ; elle ne finalise pas elle-même le paiement. En cas d'annulation ou d'échec, le Cart reste disponible.
 
 Leurs valeurs restent exclusivement dans le fichier `.env` local et ne doivent pas être commitées.
 

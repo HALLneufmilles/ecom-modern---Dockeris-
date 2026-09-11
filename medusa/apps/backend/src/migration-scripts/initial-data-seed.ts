@@ -103,7 +103,7 @@ export default async function initial_data_seed({
           name: "Europe",
           currency_code: "eur",
           countries,
-          payment_providers: ["pp_system_default"],
+          payment_providers: ["pp_stripe_stripe", "pp_stripe-checkout_stripe-checkout"],
         },
       ],
     },
@@ -221,15 +221,15 @@ export default async function initial_data_seed({
         prices: [
           {
             currency_code: "usd",
-            amount: 10,
+            amount: 0,
           },
           {
             currency_code: "eur",
-            amount: 10,
+            amount: 0,
           },
           {
             region_id: region.id,
-            amount: 10,
+            amount: 0,
           },
         ],
         rules: [

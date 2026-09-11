@@ -22,14 +22,69 @@
     <div class="form">
       <h1 class="heading">checkout</h1>
       <p class="text">delivery address</p>
-      <input type="text" id="address" placeholder="address" />
-      <input type="text" id="street" placeholder="street" />
-      <div class="three-input-container">
-        <input type="text" id="city" placeholder="city" />
-        <input type="text" id="state" placeholder="state" />
-        <input type="text" id="pincode" placeholder="pin code" />
+      <div class="two-input-container">
+        <div class="field-group">
+          <label for="last_name">Nom <span aria-hidden="true">*</span></label>
+          <input type="text" id="last_name" placeholder="nom" required aria-describedby="last_name-error" />
+          <small class="field-error" id="last_name-error" aria-live="polite"></small>
+        </div>
+        <div class="field-group">
+          <label for="first_name">Prénom <span aria-hidden="true">*</span></label>
+          <input type="text" id="first_name" placeholder="prénom" required aria-describedby="first_name-error" />
+          <small class="field-error" id="first_name-error" aria-live="polite"></small>
+        </div>
       </div>
-      <input type="text" id="landmark" placeholder="land mark" />
+      <div class="field-group">
+        <label for="address">Address <span aria-hidden="true">*</span></label>
+        <input type="text" id="address" placeholder="address" aria-describedby="address-error" />
+        <small class="field-error" id="address-error" aria-live="polite"></small>
+      </div>
+      <div class="field-group">
+        <label for="street">Street <span aria-hidden="true">*</span></label>
+        <input type="text" id="street" placeholder="street" aria-describedby="street-error" />
+        <small class="field-error" id="street-error" aria-live="polite"></small>
+      </div>
+      <div class="three-input-container">
+        <div class="field-group">
+          <label for="city">City <span aria-hidden="true">*</span></label>
+          <input type="text" id="city" placeholder="city" aria-describedby="city-error" />
+          <small class="field-error" id="city-error" aria-live="polite"></small>
+        </div>
+        <div class="field-group">
+          <label for="state">State / region <span aria-hidden="true">*</span></label>
+          <input type="text" id="state" placeholder="state" aria-describedby="state-error" />
+          <small class="field-error" id="state-error" aria-live="polite"></small>
+        </div>
+        <div class="field-group">
+          <label for="pincode">Postal code <span aria-hidden="true">*</span></label>
+          <input type="text" id="pincode" placeholder="pin code" aria-describedby="pincode-error" />
+          <small class="field-error" id="pincode-error" aria-live="polite"></small>
+        </div>
+      </div>
+      <div class="field-group">
+        <label for="landmark">Address complement</label>
+        <input type="text" id="landmark" placeholder="land mark" aria-describedby="landmark-error" />
+        <small class="field-error" id="landmark-error" aria-live="polite"></small>
+      </div>
+      <div class="field-group">
+        <label for="country">Country <span aria-hidden="true">*</span></label>
+        <select id="country" aria-label="delivery country" aria-describedby="country-error">
+          <option value="fr">France</option>
+          <option value="de">Germany</option>
+          <option value="dk">Denmark</option>
+          <option value="es">Spain</option>
+          <option value="gb">United Kingdom</option>
+          <option value="it">Italy</option>
+          <option value="se">Sweden</option>
+        </select>
+        <small class="field-error" id="country-error" aria-live="polite"></small>
+      </div>
+      <p class="required-note">* Required fields</p>
+      <p class="text checkout-subheading">delivery method</p>
+      <div id="shipping-options" class="shipping-options" aria-live="polite"></div>
+      <p class="text checkout-subheading">secure payment</p>
+      <div id="payment-element" hidden></div>
+      <p class="checkout-status" aria-live="polite"></p>
     </div>
 
     <div class="cart-section">
@@ -38,10 +93,14 @@
         <div class="cart"></div>
       </div>
       <div class="checkout-section">
-        <div class="checkout-box">
-          <p class="text">your total bill,</p>
-          <h1 class="bill">$00</h1>
-          <button class="place-order-btn">place order</button>
+        <p class="section-heading">order summary</p>
+        <div class="checkout-box price-summary">
+          <div class="summary-row"><span>Products subtotal</span><strong data-summary="subtotal">$00</strong></div>
+          <div class="summary-row"><span>Delivery</span><strong data-summary="shipping_total">$00</strong></div>
+          <div class="summary-row" data-summary-row="discount_total" hidden><span>Discount</span><strong data-summary="discount_total">$00</strong></div>
+          <div class="summary-row" data-summary-row="tax_total" hidden><span>Taxes</span><strong data-summary="tax_total">$00</strong></div>
+          <div class="summary-row summary-total"><span>Total</span><strong class="bill" data-summary="total">$00</strong></div>
+          <button class="place-order-btn" disabled>place order</button>
         </div>
       </div>
     </div>
@@ -50,6 +109,7 @@
     <script src="js/homesliders.js"></script>
     <script src="js/cart.js"></script>
     <script src="js/token.js"></script>
+    <script src="https://js.stripe.com/v3/"></script>
     <script src="js/checkout.js"></script>
   </body>
 </html>

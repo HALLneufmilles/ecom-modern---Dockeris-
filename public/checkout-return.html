@@ -1,0 +1,51 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Clothing : Checkout</title>
+    <style>
+      html,
+      body {
+        width: 100%;
+        min-height: 100%;
+        margin: 0;
+        background: #222;
+      }
+
+      .checkout-return {
+        position: fixed;
+        inset: 0;
+        z-index: 1000;
+        background: #222;
+      }
+    </style>
+    <link rel="stylesheet" href="/css/home.css" />
+    <link rel="stylesheet" href="/css/checkout.css" />
+    <link rel="stylesheet" href="/css/checkout-return.css" />
+  </head>
+  <body>
+    <main class="checkout-return" aria-live="polite">
+      <section class="checkout-return-loader" aria-label="Confirming your order">
+        <div class="checkout-loader-particles checkout-loader-particles--outer" aria-hidden="true">
+          <span></span><span></span><span></span><span></span><span></span><span></span>
+          <span></span><span></span><span></span><span></span><span></span><span></span>
+        </div>
+        <div class="checkout-loader-particles checkout-loader-particles--inner" aria-hidden="true">
+          <span></span><span></span><span></span><span></span><span></span><span></span>
+          <span></span><span></span>
+        </div>
+        <div class="checkout-loader" aria-hidden="true">
+          <span class="checkout-loader-ring checkout-loader-ring--outer"></span>
+          <span class="checkout-loader-ring checkout-loader-ring--middle"></span>
+          <span class="checkout-loader-ring checkout-loader-ring--inner"></span>
+          <span class="checkout-loader-core"></span>
+          <span class="checkout-loader-text">LOADING</span>
+        </div>
+      </section>
+      <p id="checkout-return-status" class="checkout-return-status" hidden></p>
+      <a id="checkout-return-link" class="checkout-return-link" href="/checkout" hidden>Return to checkout</a>
+    </main>
+    <script src="/js/checkout-return.js"></script>
+  </body>
+</html>

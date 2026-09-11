@@ -53,6 +53,7 @@ test("F-01 / F-02 / F-03 - inscription, déconnexion et reconnexion", async ({ p
 
     await page.goto("/signup");
 
+    await expect(page.locator("#name")).toHaveAttribute("placeholder", "Username");
     await page.locator("#name").fill("Playwright Test");
     await page.locator("#email").fill(email);
     await page.locator("#password").fill(password);
@@ -146,6 +147,43 @@ test("F-01 / F-02 / F-03 - inscription, déconnexion et reconnexion", async ({ p
     expect(restoredCart.items).toHaveLength(1);
     expect(restoredCart.items[0].variant_id).toBe(initialCart.variantId);
     expect(await page.evaluate(() => localStorage.getItem("cart"))).toBeNull();
+
+    await page.goto("/checkout");
+    await page.locator("#last_name").fill("Livraison");
+    await page.locator("#first_name").fill("Camille");
+    await page.locator("#address").fill("10 rue du Test");
+    await page.locator("#street").fill("Rue du Test");
+    await page.locator("#city").fill("La Rochelle");
+    await page.locator("#state").fill("Charente-Maritime");
+    await page.locator("#pincode").fill("17000");
+    await expect(page.locator(".shipping-option")).toHaveCount(2);
+
+    const standardResponsePromise = page.waitForResponse((response) => (
+      response.url().endsWith(`/medusa-checkout/${initialCart.id}/shipping`)
+      && response.request().method() === "POST"
+    ));
+    await page.locator(".shipping-option").filter({ hasText: "Standard Shipping" }).locator("input").click();
+    const standardCart = (await standardResponsePromise.json()).cart;
+    expect(standardCart.shipping_address.first_name).toBe("Camille");
+    expect(standardCart.shipping_address.last_name).toBe("Livraison");
+    expect(standardCart.shipping_address.first_name).not.toBe("Playwright");
+    expect(standardCart.shipping_address.last_name).not.toBe("Test");
+    expect(Number(standardCart.shipping_total)).toBe(0);
+    expect(Number(standardCart.total)).toBe(10);
+    await expect(page.locator('[data-summary="shipping_total"]')).toHaveText("0,00 €");
+    await expect(page.locator('[data-summary="total"]')).toHaveText("10,00 €");
+
+    const expressResponsePromise = page.waitForResponse((response) => (
+      response.url().endsWith(`/medusa-checkout/${initialCart.id}/shipping`)
+      && response.request().method() === "POST"
+    ));
+    await page.locator(".shipping-option").filter({ hasText: "Express Shipping" }).locator("input").click();
+    const expressCart = (await expressResponsePromise.json()).cart;
+    expect(Number(expressCart.shipping_total)).toBe(10);
+    expect(Number(expressCart.total)).toBe(20);
+    await expect(page.locator(".checkout-status")).not.toHaveText("Unable to update the delivery method.");
+    await expect(page.locator('[data-summary="shipping_total"]')).toHaveText("10,00 €");
+    await expect(page.locator('[data-summary="total"]')).toHaveText("20,00 €");
   } finally {
     // Nettoyage systématique des données du compte de test.
     await Promise.all([

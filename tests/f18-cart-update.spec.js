@@ -44,8 +44,12 @@ test("F-18 - modifier puis supprimer une ligne du Cart Medusa", async ({ page })
   await cartProduct.locator(".increment").click();
   const incrementResponse = await incrementResponsePromise;
   expect(incrementResponse.status()).toBe(200);
-  expect((await incrementResponse.json()).cart.items[0].quantity).toBe(2);
+  const incrementedCart = (await incrementResponse.json()).cart;
+  expect(incrementedCart.items[0].quantity).toBe(2);
   await expect(page.locator(`[data-line-id="${lineId}"] .item-count`)).toHaveText("2");
+  await expect(page.locator(".bill")).toHaveText(
+    new Intl.NumberFormat("fr-FR", { style: "currency", currency: incrementedCart.currency_code }).format(Number(incrementedCart.total))
+  );
 
   const decrementResponsePromise = page.waitForResponse((response) => (
     response.url().includes(`/medusa-cart/${cartId}/items/${lineId}`)
@@ -53,8 +57,12 @@ test("F-18 - modifier puis supprimer une ligne du Cart Medusa", async ({ page })
   ));
   await page.locator(`[data-line-id="${lineId}"] .decrement`).click();
   const decrementResponse = await decrementResponsePromise;
-  expect((await decrementResponse.json()).cart.items[0].quantity).toBe(1);
+  const decrementedCart = (await decrementResponse.json()).cart;
+  expect(decrementedCart.items[0].quantity).toBe(1);
   await expect(page.locator(`[data-line-id="${lineId}"] .item-count`)).toHaveText("1");
+  await expect(page.locator(".bill")).toHaveText(
+    new Intl.NumberFormat("fr-FR", { style: "currency", currency: decrementedCart.currency_code }).format(Number(decrementedCart.total))
+  );
 
   const deleteResponsePromise = page.waitForResponse((response) => (
     response.url().includes(`/medusa-cart/${cartId}/items/${lineId}`)

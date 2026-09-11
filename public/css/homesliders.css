@@ -56,9 +56,35 @@
 .product-card {
   flex: 0 0 auto;
   width: 250px;
-  height: 480px;
+  height: 450px;
   margin-right: 40px;
   cursor: pointer;
+}
+
+.similar-placeholder {
+  padding: 20px 0;
+}
+
+.similar-placeholder .product-category {
+  margin-bottom: 40px;
+}
+
+.similar-placeholder-container {
+  padding: 0 10vw;
+  display: flex;
+  gap: 40px;
+}
+
+.similar-placeholder-box {
+  flex: 0 0 250px;
+  height: 350px;
+  border: 1px dashed #d8d8d8;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 20px;
+  color: #777;
+  text-align: center;
 }
 
 .product-image {

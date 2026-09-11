@@ -20,7 +20,7 @@ const createSmallCard = (item, { mutable = false } = {}) => `
       <p class="item-count">${item.quantity}</p>
       <button class="counter-btn increment"${mutable ? "" : " disabled"}>+</button>
     </div>
-    <p class="sm-price">${formatCartPrice(item.unitPrice * item.quantity, item.currencyCode)}</p>
+    <p class="sm-price">${formatCartPrice(item.lineTotal ?? item.unitPrice * item.quantity, item.currencyCode)}</p>
     <button class="sm-delete-btn"><img src="img/close.png" alt=""></button>
   </div>
 `;
@@ -32,6 +32,7 @@ const normalizeMedusaItem = (item, currencyCode) => ({
   image: item.thumbnail,
   quantity: Number(item.quantity),
   unitPrice: Number(item.unit_price),
+  lineTotal: Number(item.total),
   currencyCode,
 });
 
@@ -66,10 +67,14 @@ const renderCart = (cart) => {
   document.querySelector(".bill").textContent = formatCartPrice(Number(cart.total || 0), cart.currency_code);
   bindCartEvents(cart.id);
   window.currentMedusaCart = cart;
+  window.dispatchEvent(new CustomEvent("medusa-cart-updated", { detail: cart }));
   return cart;
 };
 
 const mutateCartItem = async (cartId, lineId, method, quantity) => {
+  if (window.medusaCartBusy) return;
+  window.medusaCartBusy = true;
+  window.dispatchEvent(new CustomEvent("medusa-cart-busy", { detail: true }));
   const card = document.querySelector(`.sm-product[data-line-id="${lineId}"]`);
   card?.querySelectorAll("button").forEach((button) => {
     button.disabled = true;
@@ -83,9 +88,13 @@ const mutateCartItem = async (cartId, lineId, method, quantity) => {
     });
     renderCart(cart);
   } catch (error) {
+    window.dispatchEvent(new CustomEvent("medusa-cart-error", { detail: error.message }));
     card?.querySelectorAll("button").forEach((button) => {
       button.disabled = false;
     });
+  } finally {
+    window.medusaCartBusy = false;
+    window.dispatchEvent(new CustomEvent("medusa-cart-busy", { detail: false }));
   }
 };
 

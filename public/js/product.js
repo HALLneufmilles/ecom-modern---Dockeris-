@@ -323,7 +323,40 @@ const fetchProduct = async (productId) => {
   return data;
 };
 
+const renderSimilarProductsPlaceholders = () => {
+  const container = document.querySelector(".container-for-card-slider");
+  const message = "Produits similaires — en attente du catalogue Medusa";
+
+  [1, 2, 3].forEach(() => {
+    const section = document.createElement("section");
+    section.className = "product similar-placeholder";
+
+    const heading = document.createElement("h2");
+    heading.className = "product-category";
+    heading.textContent = message;
+    section.appendChild(heading);
+
+    const cards = document.createElement("div");
+    cards.className = "similar-placeholder-container";
+
+    [1, 2, 3, 4].forEach(() => {
+      const placeholder = document.createElement("div");
+      placeholder.className = "similar-placeholder-box";
+      placeholder.textContent = message;
+      cards.appendChild(placeholder);
+    });
+
+    section.appendChild(cards);
+    container.appendChild(section);
+  });
+};
+
 const loadRelatedProducts = (product) => {
+  if (product.source === "medusa") {
+    renderSimilarProductsPlaceholders();
+    return;
+  }
+
   product.tags.forEach((tag) => {
     getProducts(tag).then((data) => {
       createProductSlider(data, ".container-for-card-slider", `similar products: ${tag}`);

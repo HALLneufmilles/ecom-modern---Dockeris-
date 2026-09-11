@@ -1,6 +1,6 @@
 # CODEX_PROJECT_BOOTSTRAP.md
 
-**Version : 1.0**  
+**Version : 1.1**  
 **Statut : document générique évolutif**  
 **Objectif : préparer méthodiquement un nouveau projet avant les modifications de code importantes.**
 
@@ -278,6 +278,19 @@ Exemples fréquents :
 - navigateur ou plateformes supportées.
 
 Codex doit éviter les questions inutiles auxquelles il peut répondre en inspectant le dépôt.
+
+
+### 8.1 Regrouper les questions nécessaires
+
+Avant d'interrompre l'utilisateur, Codex doit exploiter autant que possible le dépôt, les documents de référence, le code, les tests et les informations déjà disponibles afin d'identifier les véritables inconnues.
+
+Lorsque plusieurs questions, décisions ou approbations sont raisonnablement prévisibles pour poursuivre un même objectif, Codex doit les regrouper dans une seule demande structurée plutôt que de multiplier les interruptions successives.
+
+Ce regroupement ne doit pas devenir un questionnaire préventif : Codex ne doit pas demander « au cas où » des informations qu'il peut découvrir lui-même ou qui ne sont pas encore nécessaires.
+
+Une nouvelle question en cours de travail reste justifiée lorsqu'elle dépend d'un résultat découvert pendant l'investigation, lorsqu'une nouvelle décision structurante apparaît ou lorsqu'une approbation technique imprévisible devient nécessaire.
+
+Le même principe s'applique aux vérifications non destructives nécessitant une approbation : lorsque c'est raisonnable et sûr, déterminer d'abord les informations nécessaires puis regrouper les lectures cohérentes, sans chercher à contourner les mécanismes d'autorisation.
 
 ---
 
@@ -759,6 +772,17 @@ Ne pas y ajouter une règle uniquement parce qu'elle est utile à un projet part
 ---
 
 ## Historique des versions
+
+### 1.1 — 2026-09-09
+
+Ajout d'une règle générique de réduction des interruptions :
+
+- analyser d'abord les informations déjà disponibles ;
+- regrouper les questions, décisions et approbations prévisibles liées à un même objectif ;
+- éviter les questionnaires préventifs inutiles ;
+- n'interrompre à nouveau l'utilisateur en cours de tâche que lorsqu'une nouvelle information découverte, une décision structurante ou une approbation réellement nécessaire le justifie ;
+- appliquer le même principe aux lectures non destructives nécessitant une approbation, sans contourner les mécanismes d'autorisation.
+
 
 ### 1.0 — 2026-09-02
 
