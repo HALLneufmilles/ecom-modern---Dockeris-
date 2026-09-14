@@ -11,6 +11,8 @@ const productPageState = {
   selectedVariant: null,
 };
 
+let optionValidationAttempted = false;
+
 let activeImageSlide = 0;
 
 productImages.forEach((item, index) => {
@@ -90,6 +92,16 @@ const updateOptionAvailability = () => {
   });
 };
 
+const updateOptionErrorStates = () => {
+  optionsContainer.querySelectorAll(".product-option-group").forEach((group) => {
+    const hasSelection = Boolean(productPageState.selectedOptions[group.dataset.optionId]);
+
+    group.querySelectorAll(".option-radio-btn").forEach((button) => {
+      button.classList.toggle("uncheck", optionValidationAttempted && !hasSelection && !button.disabled);
+    });
+  });
+};
+
 const updateSelectedVariant = () => {
   productPageState.selectedVariant = findSelectedVariant();
   const variant = productPageState.selectedVariant;
@@ -117,6 +129,7 @@ const selectOption = (button) => {
 
   updateOptionAvailability();
   updateSelectedVariant();
+  updateOptionErrorStates();
 };
 
 const renderOptions = (product) => {
@@ -202,19 +215,13 @@ const addMedusaVariantToCart = async () => {
   localStorage.setItem("medusa_cart_id", data.cart.id);
 };
 
-const addRedClass = () => {
-  optionsContainer.querySelectorAll(".option-radio-btn:not(:disabled)").forEach((button) => {
-    button.classList.add("uncheck");
-  });
-};
-
 const bindProductActions = (product) => {
   const wishlistBtn = document.querySelector(".wishlist-btn");
   const cartBtn = document.querySelector(".cart-btn");
 
   wishlistBtn.addEventListener("click", () => {
     if (!productPageState.selectedVariant) {
-      addRedClass();
+      updateOptionErrorStates();
       return;
     }
 
@@ -234,7 +241,8 @@ const bindProductActions = (product) => {
     const variant = productPageState.selectedVariant;
 
     if (!variant) {
-      addRedClass();
+      optionValidationAttempted = true;
+      updateOptionErrorStates();
       return;
     }
 

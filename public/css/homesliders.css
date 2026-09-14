@@ -56,7 +56,7 @@
 .product-card {
   flex: 0 0 auto;
   width: 250px;
-  height: 450px;
+  height: 480px;
   margin-right: 40px;
   cursor: pointer;
 }

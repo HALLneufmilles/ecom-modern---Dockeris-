@@ -41,11 +41,16 @@ const signedRequest = ({
     data: [{ id: "cart_test", completed_at: null, order: null }],
   }),
   emit = jest.fn().mockResolvedValue(undefined),
+  paymentOptions = {
+    webhook_delay: 10,
+    webhook_retries: 2,
+  } as { webhook_delay?: number; webhook_retries?: number } | null,
 }: {
   session?: Record<string, unknown>
   type?: string
   graph?: jest.Mock
   emit?: jest.Mock
+  paymentOptions?: { webhook_delay?: number; webhook_retries?: number } | null
 } = {}) => {
   const event = {
     id: "evt_test_billing",
@@ -58,7 +63,7 @@ const signedRequest = ({
     payload,
     secret: TEST_WEBHOOK_SECRET,
   })
-  const payment = { options: { webhook_delay: 10, webhook_retries: 2 } }
+  const payment = paymentOptions ? { options: paymentOptions } : {}
   const scope = {
     resolve: jest.fn((key) => {
       if (key === ContainerRegistrationKeys.QUERY) return { graph }
@@ -191,6 +196,18 @@ describe("Stripe Checkout billing-address webhook", () => {
     expect(emit).toHaveBeenCalledWith(expect.objectContaining({
       name: PaymentWebhookEvents.WebhookReceived,
     }), { delay: 10, attempts: 2 })
+    expect(res.sendStatus).toHaveBeenCalledWith(200)
+  })
+
+  it("emits payment processing immediately when no webhook delay is configured", async () => {
+    const { req, emit } = signedRequest({ paymentOptions: null })
+    const res = response()
+
+    await POST(req, res)
+
+    expect(emit).toHaveBeenCalledWith(expect.objectContaining({
+      name: PaymentWebhookEvents.WebhookReceived,
+    }), { delay: 0, attempts: 3 })
     expect(res.sendStatus).toHaveBeenCalledWith(200)
   })
 

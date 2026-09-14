@@ -46,24 +46,43 @@ test("F-04 - ouvrir un produit Medusa, choisir sa variante et l'ajouter au panie
   expect(legacyDetailRequests).toHaveLength(0);
 
   const cartButton = page.locator(".cart-btn");
-  await cartButton.click();
-  await expect(cartButton).toHaveText("add to cart");
-  await expect(page.locator(".option-radio-btn.uncheck").first()).toBeVisible();
+  const colorOption = product.options.find((option) => option.title.toLowerCase() === "color");
+  const sizeOption = product.options.find((option) => option.title.toLowerCase() === "size");
+  expect(colorOption).toBeTruthy();
+  expect(sizeOption).toBeTruthy();
 
+  const colorGroup = page.locator(`.product-option-group[data-option-id="${colorOption.id}"]`);
+  const sizeGroup = page.locator(`.product-option-group[data-option-id="${sizeOption.id}"]`);
   const availableVariant = product.variants.find((variant) => variant.available && variant.price);
   expect(availableVariant).toBeTruthy();
+  const colorValue = availableVariant.options.find((option) => option.optionId === colorOption.id)?.value;
+  const sizeValue = availableVariant.options.find((option) => option.optionId === sizeOption.id)?.value;
+  const colorButton = colorGroup.locator(".option-radio-btn").filter({ hasText: colorValue });
+  const sizeButton = sizeGroup.locator(".option-radio-btn").filter({ hasText: sizeValue });
 
-  for (const selectedOption of availableVariant.options) {
-    const group = page.locator(
-      `.product-option-group[data-option-id="${selectedOption.optionId}"]`
-    );
-    const optionButton = group.locator(".option-radio-btn").filter({
-      hasText: selectedOption.value,
-    });
+  await expect(page.locator(".option-radio-btn.uncheck")).toHaveCount(0);
 
-    await optionButton.click();
-    await expect(optionButton).toHaveClass(/check/);
-  }
+  await colorButton.click();
+  await expect(page.locator(".option-radio-btn.uncheck")).toHaveCount(0);
+  await expect(colorButton).toHaveClass(/check/);
+
+  await sizeButton.click();
+  await expect(page.locator(".option-radio-btn.uncheck")).toHaveCount(0);
+
+  await page.reload();
+  await expect(page.locator(".product-brand")).toHaveText(productName);
+  await cartButton.click();
+  await expect(colorGroup.locator(".option-radio-btn.uncheck").first()).toBeVisible();
+  await expect(sizeGroup.locator(".option-radio-btn.uncheck").first()).toBeVisible();
+
+  await colorButton.click();
+  await expect(colorGroup.locator(".option-radio-btn.uncheck")).toHaveCount(0);
+  await expect(colorButton).toHaveClass(/check/);
+  await expect(sizeGroup.locator(".option-radio-btn.uncheck").first()).toBeVisible();
+
+  await sizeButton.click();
+  await expect(colorGroup.locator(".option-radio-btn.uncheck")).toHaveCount(0);
+  await expect(sizeGroup.locator(".option-radio-btn.uncheck")).toHaveCount(0);
 
   await expect(page.locator(".product-stock")).toHaveText("In stock");
   await expect(page.locator(".product-price")).not.toHaveText("Price unavailable");
@@ -90,6 +109,16 @@ test("F-04 - ouvrir un produit Medusa, choisir sa variante et l'ajouter au panie
   expect(storedState.cartId).toBe(medusaCart.id);
   expect(storedState.cartId).not.toBe("cart_missing");
   expect(storedState.legacyCart).toBeNull();
+
+  await page.reload();
+  await expect(page.locator(".product-brand")).toHaveText(productName);
+  await cartButton.click();
+  await expect(colorGroup.locator(".option-radio-btn.uncheck").first()).toBeVisible();
+  await expect(sizeGroup.locator(".option-radio-btn.uncheck").first()).toBeVisible();
+  await sizeButton.click();
+  await expect(sizeGroup.locator(".option-radio-btn.uncheck")).toHaveCount(0);
+  await expect(sizeButton).toHaveClass(/check/);
+  await expect(colorGroup.locator(".option-radio-btn.uncheck").first()).toBeVisible();
 
   await page.goto("/cart");
 

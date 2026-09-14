@@ -163,7 +163,8 @@ test("F-01 / F-02 / F-03 - inscription, déconnexion et reconnexion", async ({ p
       && response.request().method() === "POST"
     ));
     await page.locator(".shipping-option").filter({ hasText: "Standard Shipping" }).locator("input").click();
-    const standardCart = (await standardResponsePromise.json()).cart;
+    const standardResponse = await standardResponsePromise;
+    const standardCart = (await standardResponse.json()).cart;
     expect(standardCart.shipping_address.first_name).toBe("Camille");
     expect(standardCart.shipping_address.last_name).toBe("Livraison");
     expect(standardCart.shipping_address.first_name).not.toBe("Playwright");
@@ -178,7 +179,8 @@ test("F-01 / F-02 / F-03 - inscription, déconnexion et reconnexion", async ({ p
       && response.request().method() === "POST"
     ));
     await page.locator(".shipping-option").filter({ hasText: "Express Shipping" }).locator("input").click();
-    const expressCart = (await expressResponsePromise.json()).cart;
+    const expressResponse = await expressResponsePromise;
+    const expressCart = (await expressResponse.json()).cart;
     expect(Number(expressCart.shipping_total)).toBe(10);
     expect(Number(expressCart.total)).toBe(20);
     await expect(page.locator(".checkout-status")).not.toHaveText("Unable to update the delivery method.");

@@ -141,7 +141,7 @@ export const POST = async (req: MedusaRequest, res: MedusaResponse) => {
         },
       },
     }, {
-      delay: paymentService.options?.webhook_delay || 5000,
+      delay: paymentService.options?.webhook_delay ?? 0,
       attempts: paymentService.options?.webhook_retries || 3,
     })
 

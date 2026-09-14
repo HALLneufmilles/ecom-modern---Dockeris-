@@ -84,3 +84,30 @@ test("F-06 - un retour Stripe non confirmé conserve le Cart", async ({ page }) 
   expect(await page.evaluate(() => localStorage.getItem("medusa_cart_id"))).toBe(cartId);
   await expect(page).toHaveURL(/\/stripe-checkout\/return/);
 });
+
+test("F-06 - le retour Stripe attend une Order déjà finalisée par le webhook", async ({ page }) => {
+  await prepareReturnPage(page);
+  let statusRequests = 0;
+
+  await page.route("**/stripe-checkout/status?**", (route) => {
+    statusRequests += 1;
+    return route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify(statusRequests === 1
+        ? { status: "pending" }
+        : { status: "complete", order }),
+    });
+  });
+  await page.route("**/medusa-orders/order_medusa_test", (route) => route.fulfill({
+    status: 200,
+    contentType: "application/json",
+    body: JSON.stringify({ order }),
+  }));
+
+  await page.goto(`/stripe-checkout/return?session_id=cs_test_delayed&cart_id=${cartId}`);
+
+  await expect(page).toHaveURL(/\/order\/order_medusa_test$/);
+  expect(statusRequests).toBeGreaterThanOrEqual(2);
+  expect(await page.evaluate(() => localStorage.getItem("medusa_cart_id"))).toBeNull();
+});
