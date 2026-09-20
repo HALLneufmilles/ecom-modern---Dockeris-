@@ -1,5 +1,24 @@
 # AGENTS.md
 
+## Table des matières
+
+- [Mission du projet](#mission-du-projet)
+- [Décisions d'architecture déjà validées](#décisions-darchitecture-déjà-validées)
+- [Sources de vérité du projet](#sources-de-vérité-du-projet)
+- [Avant toute modification](#avant-toute-modification)
+- [Actions autorisées sans décision préalable](#actions-autorisées-sans-décision-préalable)
+- [Décisions mineures et décisions structurantes](#décisions-mineures-et-décisions-structurantes)
+- [Préservation de l'existant](#préservation-de-lexistant)
+- [Méthode de modification](#méthode-de-modification)
+- [Tests](#tests)
+- [Docker Compose](#docker-compose)
+- [Sécurité](#sécurité)
+- [Documentation](#documentation)
+- [Rapport final de Codex](#rapport-final-de-codex)
+
+---
+
+
 ## Mission du projet
 
 Faire évoluer progressivement la boutique e-commerce existante vers une
@@ -13,9 +32,10 @@ La migration doit être progressive et vérifiable par les tests.
 Ces décisions ne doivent pas être remises en cause sans demande
 explicite de l'utilisateur :
 
-- la première version reste mono-marchand ;
+- la première version opérationnelle reste mono-marchand, mais l’architecture ne doit pas rendre impossible une future option multi-vendeur limitée à 2 ou 3 vendeurs ; ne pas implémenter cette option sans tâche explicite ;
 - le storefront actuel est conservé ;
 - Medusa devient le moteur e-commerce ;
+- le futur socle MVDW doit rester configurable : distinguer autant que nécessaire un Core obligatoire, des modules/options et des providers remplaçables, sans créer prématurément des abstractions ou packages inutiles ;
 - PostgreSQL devient le stockage durable des données e-commerce ;
 - Medusa Admin sert à administrer les produits ;
 - les variantes produit doivent gérer notamment les tailles et
@@ -27,6 +47,7 @@ explicite de l'utilisateur :
   Cloudflare R2 comme stockage cible ;
 - Firestore et la manipulation directe d'AWS S3 sont destinés à
   disparaître progressivement ;
+- l’ancien rôle ou parcours `seller` artisanal n’est pas une base à conserver pour le futur multi-vendeur ; une éventuelle capacité Vendor devra être conçue proprement lorsqu’elle sera explicitement demandée ;
 - Redis viendra plus tard si nécessaire ;
 - Strapi est également prévu plus tard pour le contenu éditorial.
 
@@ -41,9 +62,12 @@ Avant une modification importante, consulter selon le besoin :
 1.  `AGENTS.md` pour les règles de travail ;
 2.  `docs/CARTOGRAPHIE_FONCTIONNELLE.md` pour le fonctionnement et les
     décisions fonctionnelles ;
-3.  `readme.md` pour les commandes et le fonctionnement documenté du
+3.  `README.md` pour les commandes et le fonctionnement documenté du
     projet ;
-4.  le code et la configuration réellement présents dans la branche de
+4.  `docs/INFRASTRUCTURE_MEDUSA_STOREFRONT_v5.md` pour les décisions
+    d'infrastructure, le socle modulaire, les contraintes d'évolution
+    multi-vendeur, Docker/Compose, Stripe, les providers et la production ;
+5.  le code et la configuration réellement présents dans la branche de
     travail.
 
 `docs/CODEX_PROJECT_BOOTSTRAP_v1.0.md` est un document méthodologique
@@ -220,6 +244,9 @@ d'architecture ne constitue pas, à lui seul, une autorisation de
 modifier le design existant.
 
 En cas de doute, privilégier la conservation de l'existant.
+
+
+La préservation de l'existant ne signifie pas conserver une implémentation legacy destinée à disparaître. En particulier, ne pas conserver artificiellement l'ancien système `seller`, Firestore ou AWS S3 direct uniquement pour anticiper une fonction future. Préserver plutôt des frontières d'architecture propres permettant l'évolution ultérieure.
 
 Ne pas contourner un problème en créant inutilement des fichiers
 parallèles, copies, sauvegardes ou variantes (`-new`, `-old`, `-v2`,
@@ -476,6 +503,8 @@ explicitement.
 ## Documentation
 
 La documentation doit rester minimale et utile.
+
+Tout document permanent du projet doit comporter une **table des matières placée au début du document, immédiatement après son titre**.
 
 Mettre à jour la documentation lorsqu'une modification change réellement
 :
