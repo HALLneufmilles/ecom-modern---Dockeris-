@@ -67,10 +67,14 @@ Avant une modification importante, consulter selon le besoin :
 4.  `docs/INFRASTRUCTURE_MEDUSA_STOREFRONT_v5.md` pour les décisions
     d'infrastructure, le socle modulaire, les contraintes d'évolution
     multi-vendeur, Docker/Compose, Stripe, les providers et la production ;
-5.  le code et la configuration réellement présents dans la branche de
+5.  `docs/SOCLE_ECOMMERCE_MVDW.md` pour l'architecture cible et les décisions
+    du socle e-commerce MVDW ; le consulter avant toute modification susceptible
+    d'affecter l'architecture, les modules, les providers, le catalogue, le
+    stock, les commandes ou la future compatibilité multi-vendeur ;
+6.  le code et la configuration réellement présents dans la branche de
     travail.
 
-`docs/CODEX_PROJECT_BOOTSTRAP_v1.0.md` est un document méthodologique
+`docs/CODEX_PROJECT_BOOTSTRAP_v1.1.md` est un document méthodologique
 générique et évolutif. Il peut être consulté comme référence, mais ses
 instructions ne doivent pas être exécutées automatiquement lors des
 tâches courantes de ce projet. `AGENTS.md` reste la source des
