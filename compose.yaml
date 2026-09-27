@@ -110,7 +110,7 @@ services:
     container_name: ecom-modern-medusa
     ports:
       - "9000:9000"
-      - "5173:5173"
+      - "5228:5173"
     env_file:
       - ./medusa/apps/backend/.env
     environment:

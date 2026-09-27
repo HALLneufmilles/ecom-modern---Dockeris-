@@ -1,4 +1,4 @@
-# INFRASTRUCTURE MEDUSA + STOREFRONT — v5
+# INFRASTRUCTURE MEDUSA + STOREFRONT — v7
 
 ## Table des matières
 
@@ -10,6 +10,13 @@
    - [3.3 Email marketing](#33-email-marketing)
 4. [Stockage médias et bande passante](#4-stockage-médias-et-bande-passante)
    - [4.1 Cloudflare R2 — choix officiel pour les médias](#41-cloudflare-r2--choix-officiel-pour-les-médias)
+     - [4.1.1 Flux réel des images : Medusa → R2 → storefront](#411-flux-réel-des-images--medusa--r2--storefront)
+     - [4.1.2 Configuration locale F-19](#412-configuration-locale-f-19)
+     - [4.1.3 Politique d’upload actuelle](#413-politique-dupload-actuelle)
+     - [4.1.4 Cycle de vie des médias gérés](#414-cycle-de-vie-des-médias-gérés)
+     - [4.1.5 Validation manuelle F-19](#415-validation-manuelle-f-19)
+     - [4.1.6 Limites connues et suites](#416-limites-connues-et-suites)
+     - [4.1.7 Caractéristiques et coûts R2](#417-caractéristiques-et-coûts-r2)
    - [4.2 Scaleway Object Storage — alternative France / Union européenne](#42-scaleway-object-storage--alternative-france--union-européenne)
    - [4.3 Render](#43-render)
 5. [Configuration production retenue pour l’étude](#5-configuration-production-retenue-pour-létude)
@@ -31,7 +38,7 @@
 > Document technique de référence pour l’infrastructure e-commerce basée sur Medusa et son storefront.
 > Le `README.md` principal reste centré sur l’utilisation quotidienne, le démarrage, l’arrêt, le développement, les tests et la maintenance courante.
 >
-> **Version documentaire : v5 — mise à jour septembre 2026.**
+> **Version documentaire : v7 — mise à jour du 27 septembre 2026.**
 > **Dernière mise à jour des tarifs et choix de stockage médias : septembre 2026.**
 > Les tarifs externes doivent être revérifiés avant tout devis client.
 >
@@ -51,7 +58,7 @@
 | **PostgreSQL** | La **mémoire permanente** de la boutique : produits, commandes, clients, stocks, promotions et paniers. C’est la donnée commerciale essentielle. |
 | **PITR PostgreSQL** | *Point-In-Time Recovery*. Permet de restaurer la base à un instant précis après une erreur ou une panne, par exemple « revenir à 14 h 37 ». |
 | **Redis** | Mémoire très rapide et temporaire utilisée pour le cache, les événements, les verrous et d’autres opérations techniques. **Ce n’est pas notre base commerciale principale.** |
-| **S3 / Object Storage** | Stocke les images produits et autres fichiers. Notre référence commerciale est **50 Go de stockage médias**. |
+| **S3 / Object Storage** | Stocke les images produits et autres fichiers. Medusa y accède via son File Module et un provider compatible S3 ; Cloudflare R2 est le service de stockage de référence actuel. Notre référence commerciale est **50 Go de stockage médias**. |
 | **Sauvegardes** | Permettent de restaurer PostgreSQL et les autres données importantes en cas d’erreur, panne ou suppression accidentelle. |
 | **Monitoring** | Surveille la disponibilité, la vitesse, les erreurs, l’utilisation CPU/RAM et les logs afin de détecter rapidement un problème. |
 | **Email transactionnel / marketing** | Service d’envoi automatisé : confirmations de commande, réinitialisations de mot de passe, notifications d’expédition, remboursements, paniers abandonnés et newsletters. |
@@ -68,6 +75,7 @@
 
 - **Stockage médias** : images produits, documents et autres fichiers. Référence retenue : **50 Go**.
 - **Stockage PostgreSQL** : données structurées de la boutique : produits, commandes, clients, stocks et promotions.
+  Le registre technique `managed_media` utilisé par F-19 y conserve aussi les `fileId` nécessaires au cycle de vie contrôlé des médias.
 - **Stockage de la boîte mail professionnelle** : messages et pièces jointes de `contact@...` ou `sav@...`.
 - **Stockage des sauvegardes** : copies ou journaux permettant de restaurer les données.
 - **Stockage réservé** : espace disque conservé pour un service, même lorsqu’il ne consomme plus de puissance de calcul. Ce stockage peut donc rester facturé alors qu’un service est suspendu.
@@ -124,6 +132,329 @@ La bande passante sortante correspond aux données envoyées depuis nos services
 ### 4.1 Cloudflare R2 — choix officiel pour les médias
 
 Cloudflare R2 est le stockage objet retenu pour les images et médias du projet.
+
+Cloudflare R2 est le **service de stockage**. Medusa ne communique pas directement avec R2 comme avec une dépendance métier : le **File Module Medusa** délègue le stockage à un **provider S3 compatible**, actuellement `@medusajs/medusa/file-s3`. R2 reste donc un provider remplaçable.
+
+### 4.1.1 Flux réel des images : Medusa → R2 → storefront
+
+```text
+Medusa Admin
+     │
+     ▼
+File Module Medusa
+     │
+     ▼
+Provider S3
+     │
+     │ utilise R2_ENDPOINT
+     ▼
+Cloudflare R2
+     │
+     ▼
+Bucket
+mvdw-ecommerce-media-dev
+     │
+     └── uploads/
+          └── image.webp
+               │
+               │ URL publique
+               ▼
+          R2_FILE_URL
+               │
+               ▼
+          Storefront
+```
+
+Le même flux peut être résumé ainsi :
+
+```text
+Medusa ───────► R2_ENDPOINT ───────► Bucket
+                                      │
+                                      ▼
+                                  image.webp
+                                      │
+                                      ▼
+Storefront ◄──── R2_FILE_URL ◄────────┘
+```
+
+À retenir :
+
+- **Cloudflare R2** = service de stockage objet ;
+- **provider S3** = connecteur utilisé par Medusa pour parler à R2 via l’API compatible S3 ;
+- **bucket** = conteneur de stockage dans R2 ;
+- **`R2_ENDPOINT`** = adresse technique utilisée par Medusa pour envoyer, lire ou supprimer les fichiers via l’API S3 ;
+- **`R2_FILE_URL`** = adresse publique utilisée par le navigateur pour afficher les images ;
+- **R2 n’est donc pas le provider S3** : R2 est le stockage, le provider S3 est l’adaptateur logiciel entre Medusa et ce stockage.
+
+### 4.1.2 Configuration locale F-19
+
+Pour le développement actuel, le bucket utilisé est :
+
+```text
+mvdw-ecommerce-media-dev
+```
+
+Le **Public Development URL** `r2.dev` est utilisé pour les essais locaux. En production, un domaine personnalisé dédié aux médias est préférable.
+
+Les variables suivantes sont attendues dans :
+
+```text
+medusa/apps/backend/.env
+```
+
+Ce fichier est local et non versionné. Les valeurs sensibles ne doivent jamais être copiées dans la documentation ni committées :
+
+```env
+R2_FILE_URL=
+R2_ACCESS_KEY_ID=
+R2_SECRET_ACCESS_KEY=
+R2_BUCKET=
+R2_ENDPOINT=
+```
+
+Correspondance :
+
+```text
+R2_ENDPOINT
+→ S3 API de Cloudflare R2
+→ porte d'entrée technique utilisée par Medusa
+
+R2_FILE_URL
+→ URL publique de diffusion
+→ utilisée par le storefront pour afficher les images
+```
+
+Le `.env` racine du projet ne doit pas contenir une seconde copie de ces variables R2 si le service Medusa les charge depuis `medusa/apps/backend/.env`, afin d’éviter plusieurs sources de configuration concurrentes.
+
+### 4.1.3 Politique d’upload actuelle
+
+Le flux F-19 utilise l’endpoint Admin natif de Medusa et le File Module. Aucun endpoint public personnalisé d’upload R2 n’est nécessaire.
+
+Politique V1 actuelle :
+
+- formats autorisés : JPEG/JPG, PNG et WebP ;
+- taille maximale : 1 Mio par fichier ;
+- maximum : 10 fichiers par opération ;
+- aucun upload direct du navigateur vers R2 ;
+- les médias AWS S3 legacy ne sont pas supprimés automatiquement pendant la migration ;
+- le remplacement physique d’un fichier doit intervenir seulement après la sauvegarde réussie du Product qui référence le nouveau média.
+
+### 4.1.4 Cycle de vie des médias gérés
+
+Medusa 2.19 retourne, lors d’un upload Admin, un objet contenant notamment un identifiant de fichier et son URL publique. Le Product Medusa conserve ensuite principalement l’URL du média : l’identifiant du File Module n’est pas conservé directement dans `Product.images`.
+
+Pour éviter de devoir reconstruire une clé de fichier en découpant une URL, F-19 ajoute un registre Medusa minimal nommé `managed_media`, stocké dans PostgreSQL.
+
+```text
+Upload Admin
+   │
+   ▼
+POST /admin/uploads
+   │
+   ▼
+File Module
+   │
+   ├── fileId exact
+   └── URL publique
+          │
+          ▼
+managed_media
+status = pending
+          │
+          ▼
+Save Product réussi
+          │
+          ▼
+association exacte par URL
+          │
+          ▼
+status = associated
+```
+
+Le registre `managed_media` conserve notamment :
+
+```text
+file_id
+url
+status
+product_id
+product_image_id
+deletion_attempts
+last_error
+```
+
+Le principe est volontairement indépendant de Cloudflare R2 : le Core connaît le File Module et le `fileId`, tandis que R2 reste un provider remplaçable.
+
+#### Dissociation et suppression contrôlée
+
+Lorsqu’un média géré est retiré d’un Product :
+
+```text
+ancien média associé
+       │
+       ▼
+modification du Product dans l’Admin
+       │
+       ▼
+Save Product
+       │
+       ├── échec
+       │     └── ancien fichier conservé
+       │
+       └── succès
+             │
+             ▼
+      vérification des références
+             │
+             ├── encore référencé
+             │     └── retained_referenced
+             │
+             └── plus référencé
+                   │
+                   ▼
+             deletion_pending
+                   │
+                   ▼
+          deleteFilesWorkflow(fileId)
+                   │
+                   ▼
+             deletion_requested
+```
+
+La suppression physique n’est donc demandée qu’après la réussite de la sauvegarde du Product. Le `fileId` enregistré est utilisé directement ; aucune suppression ne dépend d’un parsing de l’URL publique.
+
+Les médias AWS S3 legacy restent hors de ce mécanisme et ne doivent pas être supprimés automatiquement par F-19.
+
+#### Cas d’un upload non associé
+
+Si un upload réussit mais que la sauvegarde du Product échoue, le nouveau média reste en `pending`. Il est donc identifiable comme fichier potentiellement orphelin et récupérable.
+
+Aucun nettoyage automatique temporel des `pending` n’est actuellement activé.
+
+### 4.1.5 Validation manuelle F-19
+
+Le flux F-19 a été validé manuellement de bout en bout en septembre 2026.
+
+#### Upload et affichage
+
+```text
+Medusa Admin
+→ ajout d’une image
+→ Save
+→ objet créé dans R2 /uploads
+→ Product Medusa mis à jour
+→ image visible dans le storefront
+→ managed_media = associated
+```
+
+Résultat : **validé**.
+
+#### Règles d’upload
+
+| Test | Résultat |
+| --- | --- |
+| JPEG / PNG / WebP ≤ 1 Mio | accepté |
+| GIF | refusé |
+| fichier > 1 Mio | refusé |
+| plus de 10 fichiers en une opération | refusé |
+| fichier refusé écrit dans R2 | non |
+
+L’interface Admin peut encore afficher, dans certains cas de refus, un message technique du type `Field 'images, x, url' is required` au lieu d’un message utilisateur explicite.
+
+#### Dissociation
+
+```text
+image gérée associée au Product
+→ retrait dans Medusa Admin
+→ Save
+→ image absente du storefront
+→ suppression demandée via le File Module
+→ objet physiquement absent de R2
+→ managed_media = deletion_requested
+→ deletion_attempts = 1
+→ last_error vide
+```
+
+Résultat : **validé**.
+
+#### Remplacement d’une image
+
+Un scénario complet A → B a également été testé :
+
+```text
+Image A
+→ upload
+→ R2
+→ storefront
+→ associated
+
+puis
+
+retrait de A
++ ajout de B
+→ Save
+→ A supprimée de R2
+→ B présente dans R2
+→ B visible dans le storefront
+→ A = deletion_requested
+→ B = associated
+```
+
+Résultat : **validé**.
+
+Cette validation confirme le flux réel suivant :
+
+```text
+Medusa Admin
+     │
+     ▼
+File Module
+     │
+     ▼
+provider S3
+     │
+     ▼
+Cloudflare R2
+     │
+     ▼
+Product Medusa
+     │
+     ▼
+Store API
+     │
+     ▼
+Storefront
+```
+
+ainsi que le cycle inverse de suppression contrôlée après sauvegarde réussie du Product.
+
+### 4.1.6 Limites connues et suites
+
+Les limites suivantes restent connues après validation F-19 :
+
+- les objets R2 créés avant l’introduction de `managed_media` ne sont pas automatiquement adoptés par le registre ;
+- les médias AWS S3 legacy restent hors de ce mécanisme ;
+- les lignes `pending` potentiellement orphelines sont conservées sans expiration automatique ;
+- un média `retained_referenced` nécessite actuellement une réévaluation ultérieure si sa dernière autre référence disparaît ;
+- la suppression d’un Product entier n’est pas encore couverte par ce cycle de nettoyage ;
+- le statut `deletion_requested` indique que la suppression a été demandée ; lors des tests manuels, la disparition physique de l’objet a été confirmée directement dans R2 ;
+- l’UX des messages de refus d’upload dans Medusa Admin peut encore être améliorée.
+
+Le mécanisme F-19 couvre donc désormais le cycle principal :
+
+```text
+upload
+→ association
+→ affichage
+→ dissociation
+→ remplacement
+→ suppression physique contrôlée
+```
+
+sans suppression destructive des médias legacy.
+
+
+### 4.1.7 Caractéristiques et coûts R2
 
 - compatible avec l’API Amazon S3 ;
 - compatible avec le File Module Medusa via le provider S3 ;
@@ -659,6 +990,26 @@ localhost:5000
 ```
 
 Les services peuvent également communiquer entre eux sur le réseau Compose sans exposer tous leurs ports au PC.
+
+
+#### Cas particulier Medusa Admin / Vite HMR sous Windows
+
+Sur cette machine de développement, Windows réserve actuellement la plage TCP `5128–5227`. Le port `5173`, utilisé en interne par Vite pour l’Admin Medusa, ne peut donc pas être publié directement sur le même port côté Windows.
+
+Le mapping local retenu est :
+
+```text
+Medusa API / Admin
+localhost:9000
+→ conteneur :9000
+
+Vite / HMR Medusa Admin
+Windows :5228
+→ conteneur :5173
+```
+
+Dans le conteneur, Vite continue donc d’utiliser `5173`, tandis que le navigateur utilise `5228` comme `clientPort` HMR. Cette adaptation évite de modifier les exclusions de ports Windows et conserve le fonctionnement interne attendu par Medusa.
+
 
 ### 15.9 Volume PostgreSQL
 
