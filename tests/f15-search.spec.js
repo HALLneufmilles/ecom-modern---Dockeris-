@@ -1,53 +1,79 @@
 const { test, expect } = require("@playwright/test");
 
-test("F-15 - rechercher un produit et ouvrir un résultat", async ({ page }) => {
-  // 1. Ouvrir l'accueil
+test("F-15 - rechercher un produit Medusa par clic et ouvrir un résultat", async ({ page }) => {
+  const legacySearchRequests = [];
+
+  page.on("request", (request) => {
+    if (new URL(request.url()).pathname === "/get-products") {
+      legacySearchRequests.push(request);
+    }
+  });
+
   await page.goto("/");
 
-  // 2. Vérifier que la barre de recherche est disponible
   const searchBox = page.locator(".search-box");
   const searchButton = page.locator(".search-btn");
-
   await expect(searchBox).toBeVisible();
   await expect(searchButton).toBeVisible();
 
-  // 3. Saisir une recherche connue de la boutique
-  await searchBox.fill("men");
-
-  // Préparer l'attente de l'appel à /get-products
+  await searchBox.fill("Medusa T-Shirt");
   const productsResponsePromise = page.waitForResponse((response) => {
-    const request = response.request();
-
-    return (
-      response.url().endsWith("/get-products") &&
-      request.method() === "POST" &&
-      request.postData()?.includes('"tag":"men"')
-    );
+    const url = new URL(response.url());
+    return url.pathname === "/medusa-search-products" && url.searchParams.get("q") === "Medusa T-Shirt";
   });
 
-  // 4. Lancer la recherche
   await searchButton.click();
+  await expect(page).toHaveURL(/\/search\/Medusa%20T-Shirt$/);
 
-  // 5. Vérifier qu'on arrive bien sur /search/men
-  await expect(page).toHaveURL(/\/search\/men$/);
-
-  // 6. Vérifier la réponse du backend
   const productsResponse = await productsResponsePromise;
-
-  // Le backend doit avoir traité correctement la recherche.
   expect(productsResponse.status()).toBe(200);
+  await expect(page.locator("#search-key")).toHaveText("Medusa T-Shirt");
+  expect(legacySearchRequests).toHaveLength(0);
 
-  // 7. Vérifier que le terme recherché est affiché
-  await expect(page.locator("#search-key")).toHaveText("men");
-
-  // 8. Vérifier qu'au moins un produit est réellement affiché
   const firstProduct = page.locator(".card-container .product-card").first();
-
   await expect(firstProduct).toBeVisible();
+  await expect(firstProduct.locator(".product-thumb")).toBeVisible();
+  await expect(firstProduct.locator(".product-brand")).not.toHaveText("");
+  await expect(firstProduct.locator(".price")).not.toHaveText("");
 
-  // 9. Ouvrir le premier résultat
   await firstProduct.click();
-
-  // 10. Vérifier qu'on arrive sur une fiche produit
   await expect(page).toHaveURL(/\/products\/.+/);
+});
+
+test("F-15 - rechercher par Entrée sans normaliser la requête", async ({ page }) => {
+  await page.goto("/");
+  await page.locator(".search-box").fill("SHIRT");
+  const productsResponsePromise = page.waitForResponse((response) => {
+    const url = new URL(response.url());
+    return url.pathname === "/medusa-search-products" && url.searchParams.get("q") === "SHIRT";
+  });
+
+  await page.locator(".search-box").press("Enter");
+  await expect(page).toHaveURL(/\/search\/SHIRT$/);
+  expect((await productsResponsePromise).status()).toBe(200);
+  await expect(page.locator(".card-container .product-card").first()).toBeVisible();
+});
+
+test("F-15 - affiche des états distincts pour aucun résultat, erreur et terme non fiable", async ({ page }) => {
+  await page.route("**/medusa-search-products*", async (route) => {
+    const query = new URL(route.request().url()).searchParams.get("q");
+
+    if (query === "indisponible") {
+      await route.fulfill({ status: 503, contentType: "application/json", body: JSON.stringify({ error: "catalogue_unavailable" }) });
+      return;
+    }
+
+    await route.fulfill({ status: 200, contentType: "application/json", body: "[]" });
+  });
+
+  await page.goto("/search/xyzproduitinexistant123");
+  await expect(page.locator(".search-state")).toHaveText("Aucun produit ne correspond à votre recherche.");
+  await expect(page.locator(".card-container .product-card")).toHaveCount(0);
+
+  await page.goto("/search/indisponible");
+  await expect(page.locator(".search-state")).toHaveText("La recherche est temporairement indisponible. Veuillez réessayer.");
+
+  await page.goto("/search/%3Cimg%20src%3Dx%20onerror%3Dalert(1)%3E");
+  await expect(page.locator("#search-key")).toHaveText("<img src=x onerror=alert(1)>");
+  await expect(page.locator(".heading img")).toHaveCount(0);
 });

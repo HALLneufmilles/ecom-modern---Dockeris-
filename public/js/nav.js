@@ -8,8 +8,8 @@ const createNav = () => {
             <a href="../index.html" ><img src="../img/dark-logo.png" class="brand-logo" alt=""></a>
             <div class="nav-items">
                 <div class="search">
-                    <input type="text" class="search-box" placeholder="search brand, product">
-                    <button class="search-btn">search</button>
+                    <input type="text" class="search-box" placeholder="Rechercher une marque, un produit">
+                    <button class="search-btn">Rechercher</button>
                 </div>
                 <a>
                     <img src="../img/user.png" id="user-img" alt="">
@@ -66,7 +66,7 @@ window.onload = () => {
     actionBtn.addEventListener("click", async () => {
       const dataToSend = {
         wishlist: localStorage.wishlist ? JSON.parse(localStorage.wishlist) : null,
-        email: JSON.parse(sessionStorage.user).email,
+        email: JSON.parse(sessionStorage.user).email
       };
       if (JSON.parse(sessionStorage.user).seller) {
         dataToSend.tagsSeller = JSON.parse(sessionStorage.user).tagsSeller;
@@ -76,7 +76,7 @@ window.onload = () => {
         await fetch("/save-user-state", {
           method: "POST",
           headers: new Headers({ "Content-Type": "application/json" }),
-          body: JSON.stringify(dataToSend),
+          body: JSON.stringify(dataToSend)
         });
       } finally {
         try {
@@ -104,17 +104,17 @@ const searchBtn = document.querySelector(".search-btn");
 const searchBox = document.querySelector(".search-box");
 // 😊
 //https://chat.openai.com/chat/b061d7f5-a1b4-408e-81c1-2374afc5f7fd#:~:text=bien%20sur%2C%20voici%20comment%20vous
-searchBox.addEventListener("keypress", (event) => {
-  if (searchBox.value.length && event.key === "Enter") {
+searchBox.addEventListener("keydown", (event) => {
+  if (searchBox.value.trim().length && event.key === "Enter") {
     event.preventDefault(); // Empêche l'envoi du formulaire
     document.querySelector(".search-btn").click(); // Clique sur le bouton de recherche
   }
 });
 
 searchBtn.addEventListener("click", () => {
-  // console.log(searchBox.value);
-  if (searchBox.value.length) {
-    const searchValue = searchBox.value.toLowerCase();
-    location.href = `/search/${searchValue}`;
+  const searchValue = searchBox.value.trim();
+
+  if (searchValue.length) {
+    location.href = `/search/${encodeURIComponent(searchValue)}`;
   }
 });

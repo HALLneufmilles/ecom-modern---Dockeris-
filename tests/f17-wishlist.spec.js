@@ -10,7 +10,7 @@ test("F-17 - ajouter un produit à la wishlist et l'afficher", async ({ page }) 
   });
 
   // 2. Trouver un vrai produit.
-  await page.goto("/search/men");
+  await page.goto("/search/Medusa");
 
   const firstProduct = page.locator(".card-container .product-card").first();
 
@@ -27,7 +27,12 @@ test("F-17 - ajouter un produit à la wishlist et l'afficher", async ({ page }) 
 
   const name = (await productName.textContent()).trim();
 
-  // 4. Choisir une taille réellement disponible.
+  // 4. Choisir les options réellement disponibles du produit Medusa.
+  const availableColor = page.locator(".color-radio-btn:visible").first();
+
+  await expect(availableColor).toBeVisible();
+  await availableColor.click();
+
   const availableSize = page.locator(".size-radio-btn:visible").first();
 
   await expect(availableSize).toBeVisible();

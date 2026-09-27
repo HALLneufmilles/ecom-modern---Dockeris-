@@ -2445,7 +2445,15 @@ Tags `men`, `women`, tableaux produit, `id`, `discount`, `images`, `name`, `shor
 
 #### Objectif utilisateur
 
-Saisir un terme dans la navigation et afficher les produits dont un tag correspond exactement.
+Saisir un terme dans la navigation et afficher les produits publiés du catalogue Medusa correspondant à la recherche de base.
+
+#### État cible actif — Medusa / PostgreSQL
+
+F-15 appartient au Core catalogue. Le navigateur conserve l'URL `/search/:key`, avec un segment construit par `encodeURIComponent`. `search.js` décode le segment avec `decodeURIComponent`, l'affiche avec `textContent`, puis appelle `GET /medusa-search-products?q=...`.
+
+Le proxy Express valide une requête non vide de 200 caractères au plus, résout la région Medusa, puis appelle `GET /store/products?q=...&region_id=...&limit=50`. Le résultat est converti dans le même DTO de carte que F-14. Une liste vide est une recherche valide ; une erreur Medusa est renvoyée distinctement. La grille F-15 est construite avec les APIs DOM, sans réinjection `innerHTML` des données de recherche.
+
+Le contrat constaté dans Medusa 2.19 sur le catalogue local est : recherche partielle sur le titre, recherche dans la description, insensibilité à la casse dans les cas testés et prise en charge des requêtes à plusieurs mots. Ce contrat ne constitue pas une recherche avancée : pas de synonymes, correction orthographique, facettes, moteur externe ni classement personnalisé.
 
 #### Déclencheur exact
 
@@ -2459,7 +2467,7 @@ Toute page chargeant `nav.js`, puis `public/search.html` servi par `/search/:key
 
 Sur la page résultat : `nav.js` → `footer.js` → `homesliders.js` → `search.js`.
 
-#### Chemin d’exécution
+#### Ancien chemin d’exécution Firestore — historique, remplacé dans F-15
 
 ```text
 nav.js::createNav()
@@ -2488,7 +2496,7 @@ Firestore → products.where("tags", "array-contains", tag).get()
 clic carte → /products/:id → F-04/F-16
 ```
 
-#### Diagramme Mermaid
+#### Diagramme Mermaid historique
 
 ```mermaid
 sequenceDiagram
@@ -2515,7 +2523,7 @@ sequenceDiagram
     S-->>Visiteur: résultats
 ```
 
-#### Tableau des fonctions
+#### Tableau des fonctions historique
 
 | Ordre | Fichier | Fonction / route | Entrée | Sortie / effet | Statut |
 | ----: | ------- | ---------------- | ------ | -------------- | ------ |
@@ -2530,10 +2538,10 @@ sequenceDiagram
 
 `searchBox.value`, `searchValue`, `searchKey`, `tag`, tableau de produits et champs de carte.
 
-#### Stockages / services impliqués
+#### Stockages / services legacy — historique
 
 - URL du navigateur ;
-- Firestore `products.tags` ;
+- Firestore `products.tags` ; F-15 n'y accède plus, mais F-16 et les parcours seller legacy utilisent encore `/get-products`.
 - DOM de la page résultat.
 
 #### Dépendances transversales
@@ -2542,7 +2550,7 @@ sequenceDiagram
 - les champs et événements de recherche sont créés dynamiquement par `nav.js::createNav()` avant leur sélection ;
 - les cartes raccordent la fiche produit F-04 et les similaires F-16.
 
-#### Problèmes identifiés
+#### Limites historiques résolues dans F-15
 
 - 🔴 recherche uniquement par tag exact `array-contains`; pas de nom, marque, description, tolérance ou synonymes ;
 - 🔴 `searchKey` est écrit avec `innerHTML` ;
@@ -2551,12 +2559,11 @@ sequenceDiagram
 - 🔴 brouillons non filtrés ;
 - 🔴 cartes construites avec HTML non échappé.
 
-#### Cible Medusa
+#### Limites restantes
 
-- **Conservé dans le storefront** : champ, validation Entrée/clic et grille de résultats.
-- **Remplacé par Medusa** 🔵 : source catalogue et filtres Store API.
-- **Développé spécifiquement** : moteur de recherche plein texte si le besoin dépasse les filtres du catalogue retenu.
-- **Suggestion** : route de recherche avec paramètre encodé, état vide et rendu sûr.
+- La recherche Core est limitée à `q` et à 50 résultats, sans interface de pagination.
+- Les liens `men`, `women` et `kids` restent une convention legacy de recherche textuelle ; leur future migration vers les catégories Medusa est hors F-15.
+- La recherche avancée (synonymes, tolérance aux fautes, facettes, index externe, recommandations ou logique Vendor) reste optionnelle.
 
 #### Critères de validation de la migration
 
@@ -2571,6 +2578,8 @@ sequenceDiagram
 - les résultats doivent contenir uniquement des produits publiables du périmètre commercial ;
 - l’absence de résultat et une erreur de service doivent produire des états distincts et compréhensibles ;
 - les champs de recherche retenus — tags seuls ou recherche enrichie — doivent correspondre à la décision métier documentée.
+
+Le champ de recherche Core est le prédicat natif Medusa `q`, selon le contrat constaté ci-dessus ; il ne dépend plus des tags Firestore.
 
 <a id="f-16"></a>
 
