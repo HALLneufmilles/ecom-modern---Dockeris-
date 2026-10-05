@@ -57,22 +57,40 @@ ou poursuivre la migration.
 
 ## Sources de vérité du projet
 
-Avant une modification importante, consulter selon le besoin :
+Les documents de référence principaux du projet sont :
 
 1.  `AGENTS.md` pour les règles de travail ;
 2.  `docs/CARTOGRAPHIE_FONCTIONNELLE.md` pour le fonctionnement et les
     décisions fonctionnelles ;
 3.  `README.md` pour les commandes et le fonctionnement documenté du
     projet ;
-4.  `docs/INFRASTRUCTURE_MEDUSA_STOREFRONT_v5.md` pour les décisions
+4.  `docs/INFRASTRUCTURE_MEDUSA_STOREFRONT_v7.md` pour les décisions
     d'infrastructure, le socle modulaire, les contraintes d'évolution
     multi-vendeur, Docker/Compose, Stripe, les providers et la production ;
 5.  `docs/SOCLE_ECOMMERCE_MVDW.md` pour l'architecture cible et les décisions
-    du socle e-commerce MVDW ; le consulter avant toute modification susceptible
-    d'affecter l'architecture, les modules, les providers, le catalogue, le
-    stock, les commandes ou la future compatibilité multi-vendeur ;
+    du socle e-commerce MVDW ;
 6.  le code et la configuration réellement présents dans la branche de
     travail.
+
+Ne pas relire systématiquement tous les documents de référence à chaque tâche.
+Avant de commencer à travailler, utiliser en priorité les informations Git
+strictement en lecture seule (état, diff, historique ou identifiant de commit)
+pour déterminer, sans relire inutilement leur contenu, si la version d'un
+document de référence a changé depuis celle déjà prise en compte dans le
+contexte de travail disponible.
+
+Relire un document de référence lorsque :
+
+- Git montre que sa version a changé depuis celle déjà prise en compte ;
+- la version actuelle du document n'est pas connue dans le contexte de travail
+  disponible ou il n'est pas possible d'établir avec suffisamment de certitude
+  qu'elle a déjà été prise en compte ;
+- le prompt demande explicitement sa relecture.
+
+Appliquer cette règle individuellement à chaque document : ne pas relire les
+autres documents uniquement parce que l'un d'eux a changé. Cette règle vise à
+maintenir le contexte architectural à jour tout en évitant les relectures et la
+consommation de contexte inutiles.
 
 `docs/CODEX_PROJECT_BOOTSTRAP_v1.1.md` est un document méthodologique
 générique et évolutif. Il peut être consulté comme référence, mais ses
