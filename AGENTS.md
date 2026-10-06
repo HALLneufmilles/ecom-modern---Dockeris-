@@ -1,7 +1,11 @@
 # AGENTS.md
 
+**Version : v1**  
+**Date de publication : 06/10/2026**
+
 ## Table des matières
 
+- [Suivi des modifications](#suivi-des-modifications)
 - [Mission du projet](#mission-du-projet)
 - [Décisions d'architecture déjà validées](#décisions-darchitecture-déjà-validées)
 - [Sources de vérité du projet](#sources-de-vérité-du-projet)
@@ -18,6 +22,13 @@
 
 ---
 
+## Suivi des modifications
+
+| Version | Date de publication | Modification | Chapitre / paragraphe concerné |
+|---|---|---|---|
+| v1 | 06/10/2026 | Ajout du suivi documentaire et clarification du statut de la cartographie fonctionnelle : elle décrit l’état initial du projet, reste figée pendant les migrations F-xx et sera remplacée, à la fin du projet, par une nouvelle cartographie de l’état final. | `Sources de vérité du projet` — `docs/CARTOGRAPHIE_FONCTIONNELLE.md` |
+
+---
 
 ## Mission du projet
 
@@ -60,8 +71,7 @@ ou poursuivre la migration.
 Les documents de référence principaux du projet sont :
 
 1.  `AGENTS.md` pour les règles de travail ;
-2.  `docs/CARTOGRAPHIE_FONCTIONNELLE.md` pour le fonctionnement et les
-    décisions fonctionnelles ;
+2.  `docs/CARTOGRAPHIE_FONCTIONNELLE.md` comme photographie de l’état fonctionnel initial du projet avant migration ;
 3.  `README.md` pour les commandes et le fonctionnement documenté du
     projet ;
 4.  `docs/INFRASTRUCTURE_MEDUSA_STOREFRONT_v7.md` pour les décisions
@@ -71,6 +81,12 @@ Les documents de référence principaux du projet sont :
     du socle e-commerce MVDW ;
 6.  le code et la configuration réellement présents dans la branche de
     travail.
+
+`docs/CARTOGRAPHIE_FONCTIONNELLE.md` est une référence historique de l’état de départ.
+Ce fichier est figé pendant les migrations F-01 à F-19 : ne pas le modifier pour
+documenter les fonctionnalités migrées, les corrections ou l’état courant du projet.
+À la fin du projet, réaliser une nouvelle cartographie fonctionnelle représentant
+l’état final afin de permettre la comparaison avec la cartographie initiale.
 
 Ne pas relire systématiquement tous les documents de référence à chaque tâche.
 Avant de commencer à travailler, utiliser en priorité les informations Git
