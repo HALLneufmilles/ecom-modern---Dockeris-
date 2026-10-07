@@ -1,7 +1,8 @@
-# Socle e-commerce MVDW v1
+# Socle e-commerce MVDW v2
 
 ## Table des matières
 
+- [Suivi des modifications](#suivi-des-modifications)
 - [Objectif](#objectif)
 - [Multi-vendeur](#multi-vendeur)
 - [Core obligatoire — première définition](#core-obligatoire--première-définition)
@@ -19,6 +20,12 @@
 - [Multi-vendeur comme capacité optionnelle future](#multi-vendeur-comme-capacité-optionnelle-future)
 - [Principe d'architecture](#principe-darchitecture)
 - [État de la conception](#état-de-la-conception)
+
+## Suivi des modifications
+
+| Version | Date de publication | Modification | Chapitre / paragraphe concerné |
+|---|---|---|---|
+| v2 | 07/10/2026 | Décision fonctionnelle F-17 : la wishlist est au niveau du Product Medusa, sans référence métier à une ProductVariant ; ajout autorisé indépendamment de la sélection ou de la disponibilité d'une variante. | `Wishlist` |
 
 ## Objectif
 
@@ -381,7 +388,22 @@ Exemples :
 
 La wishlist actuelle, fondée sur `localStorage` et Firestore, est legacy.
 
-Lors de F-17, elle devra devenir une fonction optionnelle MVDW persistante liée au `Customer` et aux `Product` Medusa. Le modèle de données exact sera défini lors de cette étude et n'est pas décidé maintenant.
+Lors de F-17, elle devra devenir une fonction optionnelle MVDW persistante liée au `Customer` et aux `Product` Medusa. PostgreSQL et Medusa devront en être la source de vérité.
+
+### Granularité métier
+
+Une entrée de wishlist exprime : « ce produit m'intéresse ».
+
+- `WishlistItem` référence un `Product` Medusa ;
+- aucune `ProductVariant` ne doit être enregistrée comme élément métier de la wishlist ;
+- une combinaison précise de taille, couleur ou autre option n'est pas mémorisée ;
+- le prix, le titre, l'image et la disponibilité ne sont pas dupliqués dans la wishlist : ils restent issus du catalogue Medusa.
+
+L'ajout d'un `Product` à la wishlist ne dépend ni de la sélection d'une variante, ni de sa disponibilité. Un produit doit donc pouvoir être ajouté même si une taille, une couleur ou toute autre variante est actuellement indisponible ou non sélectionnable dans le storefront.
+
+Cette règle ne modifie pas le panier : son ajout peut continuer à nécessiter une `ProductVariant` valide et disponible.
+
+La wishlist reste une fonction optionnelle configurée par boutique ou déploiement. Lorsqu'elle est désactivée, son interface, ses routes, ses workflows et ses traitements spécifiques sont inactifs ; les données persistantes existantes sont conservées pour permettre une réactivation ultérieure. Cette conception ne doit introduire ni module `Vendor` ni dépendance à un vendeur, afin de rester compatible avec une évolution future de 1 à 3 vendeurs.
 
 ## Médias
 
