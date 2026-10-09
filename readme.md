@@ -1,10 +1,15 @@
 # Projet e-commerce — Storefront + Medusa + PostgreSQL
 
+**Version : v1**  
+**Date de publication : 09/10/2026**
+
 <a id="table-des-matieres"></a>
 
 ## Table des matières
+- [Suivi des modifications](#suivi-des-modifications)
 - [Utilisation quotidienne — à lire en premier](#utilisation-quotidienne)
   - [Arbre de décision rapide](#arbre-decision-rapide)
+- [Identifiant de test](#identifiant-de-test)
 - [Documents du projet et localisation](#documents-du-projet)
 - [1. Qu'est-ce que Medusa ?](#medusa)
 - [2. Objectif de la migration](#objectif)
@@ -20,6 +25,16 @@
 - [12. Commandes destructives / données](#commandes-dangereuses)
 - [13. Résumé des règles à retenir](#regles)
 - [14. Pour aller plus loin](#details)
+
+---
+
+<a id="suivi-des-modifications"></a>
+
+## Suivi des modifications
+
+| Version | Date de publication | Modification | Chapitre / paragraphe concerné |
+|---|---|---|---|
+| v1 | 09/10/2026 | Première version suivie : mise à jour de la référence Playwright à 35 scénarios déclarés, ajout de l’inventaire actuel des tests, ajout des identifiants de test et mise à jour des références vers la documentation Infrastructure actuelle. | `Utilisation quotidienne — Lancer les tests`, `Identifiant de test`, `Documents du projet et localisation`, `Tests de non-régression`, références Infrastructure |
 
 ---
 
@@ -125,8 +140,12 @@ node .\node_modules\playwright\cli.js test f06-payment-order
 Baseline actuellement validée :
 
 ```text
-22 tests Playwright réussis sur 22
+35 scénarios Playwright déclarés
+Wishlist activée : 34 réussis, 1 ignoré
+Wishlist désactivée : les deux scénarios F-17 conditionnels inversent leur statut
 ```
+
+Le scénario ignoré est attendu : un seul des deux scénarios F-17 (`wishlist` ON ou OFF) s’exécute selon la valeur du feature flag.
 
 Test unitaire du webhook Stripe, depuis `medusa\apps\backend` :
 
@@ -174,6 +193,21 @@ Je reprends le projet
 
 ---
 
+<a id="identifiant-de-test"></a>
+
+## Identifiant de test
+
+Ces identifiants sont réservés aux tests locaux du projet :
+
+```text
+Login : user2@user.fr
+Mot de passe : user256000
+```
+
+> ⚠️ Ne jamais remplacer ces identifiants de test par de véritables identifiants personnels, mots de passe, clés API ou secrets.
+
+---
+
 <a id="documents-du-projet"></a>
 
 ## Documents du projet et localisation
@@ -188,7 +222,7 @@ Les documents permanents du projet doivent être retrouvables depuis cette secti
 | `.env` | **racine locale uniquement — non commité** | secrets et variables d'environnement locales |
 | `docs/CARTOGRAPHIE_FONCTIONNELLE.md` | dossier `docs/` | fonctionnement métier, fiches F-01 à F-19 et cible fonctionnelle |
 | `docs/CODEX_PROJECT_BOOTSTRAP_v1.0.md` | dossier `docs/` | méthode générique de reprise / bootstrap d'un projet avec Codex |
-| `docs/INFRASTRUCTURE_MEDUSA_STOREFRONT_v5.md` | dossier `docs/` | architecture détaillée, socle modulaire, évolution multi-vendeur, production, Docker/Compose, Stripe, stockage, fournisseurs et coûts |
+| `docs/INFRASTRUCTURE_MEDUSA_STOREFRONT_v8.md` | dossier `docs/` | architecture détaillée, socle modulaire, évolution multi-vendeur, production, Docker/Compose, Stripe, stockage, fournisseurs et coûts |
 | `docs/images/architecture/` | dossier `docs/` | schémas utilisés par le README et la documentation Infrastructure |
 
 ### Quelle documentation consulter ?
@@ -204,7 +238,7 @@ Je veux comprendre une fonction F-xx
 → docs/CARTOGRAPHIE_FONCTIONNELLE.md
 
 Je veux comprendre l'architecture ou un choix technique en détail
-→ docs/INFRASTRUCTURE_MEDUSA_STOREFRONT_v5.md
+→ docs/INFRASTRUCTURE_MEDUSA_STOREFRONT_v8.md
 
 Je veux réutiliser notre méthode sur un autre projet
 → docs/CODEX_PROJECT_BOOTSTRAP_v1.0.md
@@ -226,7 +260,7 @@ Le storefront reste le site visible par le client. Medusa prend progressivement 
 
 Medusa n'est donc pas une nouvelle interface graphique à la place de notre boutique : il devient le **moteur métier** auquel le storefront se connecte.
 
-> 📚 **Plus de détails :** `docs/INFRASTRUCTURE_MEDUSA_STOREFRONT_v5.md`, sections *Rôle des composants* et *Architecture locale / production*.
+> 📚 **Plus de détails :** `docs/INFRASTRUCTURE_MEDUSA_STOREFRONT_v8.md`, sections *Rôle des composants* et *Architecture locale / production*.
 
 ---
 
@@ -275,7 +309,7 @@ Medusa
 PostgreSQL
 ```
 
-> 📚 **Plus de détails :** `docs/CARTOGRAPHIE_FONCTIONNELLE.md` pour les fonctions F-01 à F-19 et `docs/INFRASTRUCTURE_MEDUSA_STOREFRONT_v5.md` pour les décisions d'architecture.
+> 📚 **Plus de détails :** `docs/CARTOGRAPHIE_FONCTIONNELLE.md` pour les fonctions F-01 à F-19 et `docs/INFRASTRUCTURE_MEDUSA_STOREFRONT_v8.md` pour les décisions d'architecture.
 
 ---
 
@@ -314,7 +348,7 @@ Un **conteneur** est une instance réellement exécutée à partir d'une image.
 
 ![Du Dockerfile au conteneur](./docs/images/architecture/03-docker-build-flow.png)
 
-> 📚 **Plus de détails :** `docs/INFRASTRUCTURE_MEDUSA_STOREFRONT_v5.md`, section *Architecture locale Docker / Docker Compose*. On y retrouve `build:`, `image:`, `target`, ports, volumes, noms d'images/conteneurs et différence local / production.
+> 📚 **Plus de détails :** `docs/INFRASTRUCTURE_MEDUSA_STOREFRONT_v8.md`, section *Architecture locale Docker / Docker Compose*. On y retrouve `build:`, `image:`, `target`, ports, volumes, noms d'images/conteneurs et différence local / production.
 
 ---
 
@@ -386,7 +420,7 @@ docker compose down
 
 Supprime les conteneurs et le réseau Compose. Après cela, `start` ne suffit plus.
 
-> 📚 **Plus de détails :** `docs/INFRASTRUCTURE_MEDUSA_STOREFRONT_v5.md`.
+> 📚 **Plus de détails :** `docs/INFRASTRUCTURE_MEDUSA_STOREFRONT_v8.md`.
 
 ---
 
@@ -511,7 +545,7 @@ PostgreSQL
       └── tables e-commerce
 ```
 
-> 📚 **Plus de détails :** `docs/INFRASTRUCTURE_MEDUSA_STOREFRONT_v5.md`, notamment le rôle du serveur Medusa, du Worker, de PostgreSQL et de Redis.
+> 📚 **Plus de détails :** `docs/INFRASTRUCTURE_MEDUSA_STOREFRONT_v8.md`, notamment le rôle du serveur Medusa, du Worker, de PostgreSQL et de Redis.
 
 ---
 
@@ -573,7 +607,7 @@ docker volume ls
 
 > ⚠️ `postgres-data` contient les données locales. Ne pas le supprimer par habitude.
 
-> 📚 **Plus de détails :** `docs/INFRASTRUCTURE_MEDUSA_STOREFRONT_v5.md`, sections sur les stockages, PostgreSQL, sauvegardes et architecture de production.
+> 📚 **Plus de détails :** `docs/INFRASTRUCTURE_MEDUSA_STOREFRONT_v8.md`, sections sur les stockages, PostgreSQL, sauvegardes et architecture de production.
 
 ---
 
@@ -634,7 +668,7 @@ Un délai explicitement configuré reste respecté.
 
 Carte bancaire et Link utilisent le même Checkout hébergé.
 
-> 📚 **Plus de détails :** `docs/INFRASTRUCTURE_MEDUSA_STOREFRONT_v5.md`, section *Paiement Stripe, webhook et création d'Order Medusa* : Payment Provider, événements, signature `whsec_...`, paiement synchrone/asynchrone, idempotence et différence local / production.
+> 📚 **Plus de détails :** `docs/INFRASTRUCTURE_MEDUSA_STOREFRONT_v8.md`, section *Paiement Stripe, webhook et création d'Order Medusa* : Payment Provider, événements, signature `whsec_...`, paiement synchrone/asynchrone, idempotence et différence local / production.
 
 ---
 
@@ -645,8 +679,12 @@ Carte bancaire et Link utilisent le même Checkout hébergé.
 Baseline actuelle :
 
 ```text
-22 tests Playwright réussis sur 22
+35 scénarios Playwright déclarés
+Wishlist activée : 34 réussis, 1 ignoré
+Wishlist désactivée : les deux scénarios F-17 conditionnels inversent leur statut
 ```
+
+Le scénario ignoré est attendu : la suite contient un scénario F-17 pour la Wishlist activée et un autre pour la Wishlist désactivée.
 
 ### Suite complète
 
@@ -660,25 +698,48 @@ node .\node_modules\playwright\cli.js test
 node .\node_modules\playwright\cli.js test f04-product-cart
 node .\node_modules\playwright\cli.js test f05-checkout
 node .\node_modules\playwright\cli.js test f06-payment-order
+node .\node_modules\playwright\cli.js test f17-wishlist
+node .\node_modules\playwright\cli.js test f18-cart-update
+node .\node_modules\playwright\cli.js test f19-images
 ```
+
+### Inventaire actuel
+
+| Fichier / périmètre | Scénarios | Couverture principale |
+|---|---:|---|
+| F-01 / F-02 / F-03 | 1 | inscription, déconnexion, reconnexion, persistance du Cart et bascule Standard ↔ Express sans cumul |
+| F-04 | 5 | fiche produit Medusa, variante, ajout Cart, libellés Couleur, indisponibilités et galeries |
+| F-05 Checkout | 3 | formulaire, reset Checkout, livraison, quantités, totaux, refresh, retour et BFCache |
+| F-06 Stripe / Order | 4 | retours Stripe carte/Link, retour non confirmé et attente d’une Order finalisée |
+| F-07 à F-14 | 8 | un scénario de non-régression par fonctionnalité |
+| F-15 Recherche | 3 | recherche par clic/Entrée, aucun résultat et erreur |
+| F-16 Recommandations | 6 | sélection catégorielle, carrousel, limites, vide/erreur et ON/OFF |
+| F-17 Wishlist | 2 | persistance Customer/Product et scénario ON/OFF conditionnel |
+| F-18 Panier | 1 | modification et suppression d’une ligne du Cart |
+| F-19 Images | 1 | retrait puis remplacement d’une image produit |
+| Smoke | 1 | disponibilité de la page d’accueil |
+| **Total** | **35** | **34 exécutés et réussis + 1 ignoré avec Wishlist activée** |
 
 F-05 protège notamment :
 
-- sélection de livraison incohérente ;
-- `Delivery = 0` alors qu'une livraison est payante ;
-- changement de livraison non resynchronisé ;
-- quantités `+` / `-` et résumé périmé ;
-- totaux qui ne correspondent pas au nouveau Cart ;
-- erreurs de champs non réévaluées indépendamment ;
+- reset du Checkout à chaque nouvelle entrée ;
+- formulaire vide après entrée, refresh, retour ou restauration BFCache ;
+- aucune méthode de livraison active après reset ;
+- remplacement Standard ↔ Express sans cumul ;
+- conservation des lignes produit du Cart pendant le reset ;
+- `Delivery = 0` lorsqu'aucune livraison n'est sélectionnée ;
+- quantités `+` / `-` et résumé synchronisé ;
+- cohérence des sous-totaux et totaux Medusa ;
 - récupération après erreur API ;
-- cohérence du checkout au chargement initial.
+- abandon / retour Stripe sans perdre le Cart.
 
 F-06 protège notamment :
 
 - retour Stripe carte ;
 - retour Stripe Link ;
 - retour non confirmé conservant le Cart ;
-- polling jusqu'à une Order finalisée par le webhook.
+- polling jusqu'à une Order finalisée par le webhook ;
+- priorité donnée à la finalisation d’un paiement réussi avant tout reset Checkout.
 
 ### Test unitaire du webhook Stripe
 
@@ -849,7 +910,7 @@ Le README doit rester rapide à utiliser.
 Pour les explications de référence, consulter :
 
 ```text
-docs/INFRASTRUCTURE_MEDUSA_STOREFRONT_v5.md
+docs/INFRASTRUCTURE_MEDUSA_STOREFRONT_v8.md
 ```
 
 Ce document détaille notamment :

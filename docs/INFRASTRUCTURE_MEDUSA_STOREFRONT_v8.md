@@ -1,7 +1,8 @@
-# INFRASTRUCTURE MEDUSA + STOREFRONT — v7
+# INFRASTRUCTURE MEDUSA + STOREFRONT — v8
 
 ## Table des matières
 
+- [Suivi des modifications](#suivi-des-modifications)
 1. [Rôle des composants](#1-rôle-des-composants)
 2. [Les stockages à ne pas confondre](#2-les-stockages-à-ne-pas-confondre)
 3. [Emails : trois notions différentes](#3-emails--trois-notions-différentes)
@@ -35,10 +36,18 @@
 
 ---
 
+## Suivi des modifications
+
+| Version | Date de publication | Modification | Chapitre / paragraphe concerné |
+|---|---|---|---|
+| v8 | 09/10/2026 | Mise à jour de la référence de tests Playwright à 35 scénarios déclarés et documentation du reset Checkout, de la remise à zéro de la livraison entre sessions Checkout et du remplacement exclusif Standard ↔ Express. | `16. Paiement Stripe, webhook et création d’Order Medusa` — `16.13 Tests associés` |
+
+---
+
 > Document technique de référence pour l’infrastructure e-commerce basée sur Medusa et son storefront.
 > Le `README.md` principal reste centré sur l’utilisation quotidienne, le démarrage, l’arrêt, le développement, les tests et la maintenance courante.
 >
-> **Version documentaire : v7 — mise à jour du 27 septembre 2026.**
+> **Version documentaire : v8 — mise à jour du 09/10/2026.**
 > **Dernière mise à jour des tarifs et choix de stockage médias : septembre 2026.**
 > Les tarifs externes doivent être revérifiés avant tout devis client.
 >
@@ -1200,13 +1209,32 @@ Si le paiement n’est pas confirmé :
 
 ### 16.13 Tests associés
 
-La baseline actuelle est de :
+La suite Playwright actuelle définit **35 scénarios**.
+
+Avec `MVDW_FEATURE_WISHLIST=true`, la dernière baseline validée est :
 
 ```text
-22 tests Playwright réussis sur 22
+34 scénarios réussis
+1 scénario ignoré (F-17 Wishlist OFF)
+0 échec
 ```
 
-Les scénarios F-05/F-06 couvrent notamment le checkout, la livraison, les retours Stripe et le polling jusqu’à une Order finalisée par le webhook.
+Lorsque `MVDW_FEATURE_WISHLIST=false`, les deux scénarios F-17 conditionnels inversent leur statut : le scénario OFF s’exécute et le scénario ON est ignoré.
+
+Les scénarios F-05/F-06 couvrent notamment :
+
+- le reset explicite du Checkout à chaque nouvelle entrée, après refresh et lors d’une restauration BFCache ;
+- la remise à zéro du formulaire Checkout et de l’adresse de livraison persistée dans le Cart ;
+- l’absence de méthode de livraison active après un reset ;
+- le remplacement Standard ↔ Express avec une seule méthode active, sans cumul ;
+- la conservation intégrale des lignes produit du Cart pendant un reset Checkout ;
+- l’abandon ou l’annulation d’un parcours Stripe avec conservation du Cart ;
+- la priorité donnée à la finalisation d’un retour Stripe réussi avant tout reset Checkout ;
+- les retours Stripe carte et Link ;
+- le retour non confirmé conservant le Cart ;
+- le polling jusqu’à une Order finalisée par le webhook.
+
+La page Panier affiche le sous-total des articles (`item_subtotal`) et ne présente pas les frais de livraison avant Checkout. Les frais de livraison, remises, taxes et le total final sont affichés dans le Checkout à partir des valeurs Medusa.
 
 Le test unitaire du webhook protège notamment :
 

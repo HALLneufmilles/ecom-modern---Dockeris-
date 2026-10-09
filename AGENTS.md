@@ -1,7 +1,7 @@
 # AGENTS.md
 
-**Version : v1**  
-**Date de publication : 06/10/2026**
+**Version : v2**  
+**Date de publication : 09/10/2026**
 
 ## Table des matières
 
@@ -26,6 +26,7 @@
 
 | Version | Date de publication | Modification | Chapitre / paragraphe concerné |
 |---|---|---|---|
+| v2 | 09/10/2026 | Mise à jour de la baseline Playwright : 35 scénarios déclarés, dont 34 exécutés et réussis et 1 ignoré selon le feature flag Wishlist ; mise à jour des références vers les versions actuelles des documents de référence. | `Sources de vérité du projet`, `Tests` |
 | v1 | 06/10/2026 | Ajout du suivi documentaire et clarification du statut de la cartographie fonctionnelle : elle décrit l’état initial du projet, reste figée pendant les migrations F-xx et sera remplacée, à la fin du projet, par une nouvelle cartographie de l’état final. | `Sources de vérité du projet` — `docs/CARTOGRAPHIE_FONCTIONNELLE.md` |
 
 ---
@@ -74,10 +75,10 @@ Les documents de référence principaux du projet sont :
 2.  `docs/CARTOGRAPHIE_FONCTIONNELLE.md` comme photographie de l’état fonctionnel initial du projet avant migration ;
 3.  `README.md` pour les commandes et le fonctionnement documenté du
     projet ;
-4.  `docs/INFRASTRUCTURE_MEDUSA_STOREFRONT_v7.md` pour les décisions
+4.  `docs/INFRASTRUCTURE_MEDUSA_STOREFRONT_v8.md` pour les décisions
     d'infrastructure, le socle modulaire, les contraintes d'évolution
     multi-vendeur, Docker/Compose, Stripe, les providers et la production ;
-5.  `docs/SOCLE_ECOMMERCE_MVDW.md` pour l'architecture cible et les décisions
+5.  `docs/SOCLE_ECOMMERCE_MVDW_v2.md` pour l'architecture cible et les décisions
     du socle e-commerce MVDW ;
 6.  le code et la configuration réellement présents dans la branche de
     travail.
@@ -443,7 +444,12 @@ Commande de référence depuis Codex :
 
 `<runtime-node-direct> .\\node_modules\\playwright\\cli.js test`
 
-La baseline de non-régression actuelle est de 22 tests Playwright réussis sur 22.
+La suite de non-régression actuelle définit 35 scénarios Playwright.
+
+Avec `MVDW_FEATURE_WISHLIST=true`, la baseline validée est de 34 scénarios
+réussis et 1 scénario ignoré. Avec `MVDW_FEATURE_WISHLIST=false`, les deux
+scénarios F-17 conditionnels inversent leur statut. Un scénario ignoré dans
+ce contexte est donc attendu et ne constitue pas un échec.
 
 Ne jamais modifier un test simplement pour obtenir un résultat vert sans
 avoir vérifié que le comportement attendu doit réellement changer.
