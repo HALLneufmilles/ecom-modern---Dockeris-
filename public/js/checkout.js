@@ -9,6 +9,7 @@ let stripeElements = null;
 let paymentPrepared = false;
 let checkoutReady = false;
 let checkoutBusy = false;
+let checkoutResetPromise = null;
 
 const requestCheckout = async (path, options) => {
   const response = await fetch(path, options);
@@ -75,6 +76,23 @@ const clearAddressErrors = (prefix = "") => {
     element.removeAttribute("aria-invalid");
     error.textContent = "";
   });
+};
+
+const resetCheckoutForm = () => {
+  addressFields.forEach((field) => {
+    const element = document.querySelector(`#${field}`);
+    element.value = field === "country" ? "fr" : "";
+  });
+  clearAddressErrors();
+  paymentElementContainer.replaceChildren();
+  paymentElementContainer.hidden = true;
+  shippingOptionsElement.querySelectorAll("input").forEach((input) => {
+    input.checked = false;
+  });
+  stripe = null;
+  stripeElements = null;
+  paymentPrepared = false;
+  setCheckoutStatus("");
 };
 
 const addressErrors = (address) => {
@@ -247,11 +265,41 @@ const resumeStripeReturn = async (checkoutData) => {
   if (error || !["succeeded", "requires_capture"].includes(paymentIntent?.status)) {
     setCheckoutStatus(error?.message || "Payment was not completed. Your cart is unchanged.", true);
     setCheckoutBusy(false);
-    return true;
+    return false;
   }
 
   await completeCart();
   return true;
+};
+
+const resetCheckoutEntry = async () => {
+  if (checkoutResetPromise) return checkoutResetPromise;
+
+  checkoutResetPromise = (async () => {
+    checkoutReady = false;
+    resetCheckoutForm();
+    setCheckoutBusy(true);
+
+    const checkoutData = await requestCheckout(
+      `/medusa-checkout/${encodeURIComponent(checkoutCart.id)}/reset`,
+      { method: "POST" }
+    );
+    if (!checkoutData.cart?.id || !checkoutData.stripeCheckoutAvailable) {
+      throw new Error("invalid_checkout_response");
+    }
+
+    renderCart(checkoutData.cart);
+    renderShippingOptions(checkoutData.shippingOptions, checkoutData.cart.currency_code);
+    checkoutReady = true;
+    setCheckoutBusy(false);
+    return checkoutData;
+  })();
+
+  try {
+    return await checkoutResetPromise;
+  } finally {
+    checkoutResetPromise = null;
+  }
 };
 
 const initializeCheckout = async () => {
@@ -268,26 +316,20 @@ const initializeCheckout = async () => {
   }
 
   try {
-    const checkoutData = await requestCheckout(`/medusa-checkout/${encodeURIComponent(checkoutCart.id)}`);
-    if (!checkoutData.stripeCheckoutAvailable) {
-      throw new Error("stripe_checkout_not_configured");
-    }
-
-    if (!checkoutData.cart?.id) throw new Error("invalid_checkout_response");
-    renderCart(checkoutData.cart);
-    renderShippingOptions(checkoutData.shippingOptions, checkoutCart.currency_code);
-    checkoutReady = true;
     const legacyStripeReturn = new URLSearchParams(location.search).has("payment_intent_client_secret");
     if (legacyStripeReturn) {
+      const checkoutData = await requestCheckout(`/medusa-checkout/${encodeURIComponent(checkoutCart.id)}`);
       if (!checkoutData.stripeAvailable || !checkoutData.stripePublishableKey || typeof Stripe !== "function") {
         throw new Error("stripe_not_configured");
       }
       if (await resumeStripeReturn(checkoutData)) return;
     }
+    await resetCheckoutEntry();
     if (new URLSearchParams(location.search).get("payment_cancelled") === "true") {
       setCheckoutStatus("Payment was canceled. Your cart is unchanged.");
+    } else if (legacyStripeReturn) {
+      setCheckoutStatus("Payment was not completed. Your cart is unchanged.", true);
     }
-    setCheckoutBusy(false);
   } catch (error) {
     if (error.status === 401) {
       sessionStorage.removeItem("user");
@@ -298,6 +340,17 @@ const initializeCheckout = async () => {
     placeOrderBtn.disabled = true;
   }
 };
+
+window.addEventListener("pageshow", async (event) => {
+  if (!event.persisted || !sessionStorage.user || !checkoutCart?.id || !checkoutCart.items?.length) return;
+
+  try {
+    await resetCheckoutEntry();
+  } catch (error) {
+    setCheckoutStatus("Checkout is temporarily unavailable.", true);
+    placeOrderBtn.disabled = true;
+  }
+});
 
 const preparePayment = async () => {
   if (checkoutBusy || !checkoutReady || !checkoutCart?.items?.length) return;

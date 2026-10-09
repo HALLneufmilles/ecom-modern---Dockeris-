@@ -59,15 +59,12 @@ const processData = (data) => {
     user.authToken = generateToken(data.email);
     // sessionStorage.user = JSON.stringify(user);
     sessionStorage.setItem("user", JSON.stringify(user));
-    let wishlist = data.wishlist;
-    // console.log("processDataWishlist", wishlist);
-
     if (data.cartId) {
       localStorage.setItem("medusa_cart_id", data.cartId);
     } else {
       localStorage.removeItem("medusa_cart_id");
     }
-    localStorage.setItem("wishlist", JSON.stringify(wishlist));
+    localStorage.removeItem("wishlist");
 
     location.replace("/");
   } else if (data == true) {

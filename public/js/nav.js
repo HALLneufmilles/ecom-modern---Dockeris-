@@ -65,7 +65,6 @@ window.onload = () => {
     actionBtn.innerHTML = "log out";
     actionBtn.addEventListener("click", async () => {
       const dataToSend = {
-        wishlist: localStorage.wishlist ? JSON.parse(localStorage.wishlist) : null,
         email: JSON.parse(sessionStorage.user).email
       };
       if (JSON.parse(sessionStorage.user).seller) {

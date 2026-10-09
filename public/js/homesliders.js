@@ -1,19 +1,41 @@
 const setupSlidingEffect = () => {
-  const productContainers = [...document.querySelectorAll(".product-container")];
-  const nxtBtn = [...document.querySelectorAll(".nxt-btn")];
-  const preBtn = [...document.querySelectorAll(".pre-btn")];
+  const productContainers = [...document.querySelectorAll(".product-container:not([data-slider-initialized])")];
 
-  productContainers.forEach((item, i) => {
-    let containerDimenstions = item.getBoundingClientRect();
-    let containerWidth = containerDimenstions.width;
+  productContainers.forEach((item) => {
+    const slider = item.closest(".product");
+    const nextButton = slider?.querySelector(".nxt-btn");
+    const previousButton = slider?.querySelector(".pre-btn");
 
-    nxtBtn[i].addEventListener("click", () => {
-      item.scrollLeft += containerWidth;
-    });
+    if (!nextButton || !previousButton) {
+      return;
+    }
 
-    preBtn[i].addEventListener("click", () => {
-      item.scrollLeft -= containerWidth;
-    });
+    item.dataset.sliderInitialized = "true";
+
+    const updateButtons = () => {
+      const maxScrollLeft = item.scrollWidth - item.clientWidth;
+      const isRecommendationSlider = slider.classList.contains("recommendation-slider");
+      const hasMoreThanFourRecommendations = item.querySelectorAll(".product-card").length > 4;
+      const canScroll = maxScrollLeft > 1 && (!isRecommendationSlider || hasMoreThanFourRecommendations);
+      const isAtStart = item.scrollLeft <= 1;
+      const isAtEnd = item.scrollLeft >= maxScrollLeft - 1;
+
+      previousButton.disabled = !canScroll || isAtStart;
+      nextButton.disabled = !canScroll || isAtEnd;
+    };
+
+    const scrollByPage = (direction) => {
+      item.scrollBy({
+        left: direction * item.clientWidth,
+        behavior: "smooth",
+      });
+    };
+
+    nextButton.addEventListener("click", () => scrollByPage(1));
+    previousButton.addEventListener("click", () => scrollByPage(-1));
+    item.addEventListener("scroll", updateButtons, { passive: true });
+    window.addEventListener("resize", updateButtons);
+    updateButtons();
   });
 };
 
@@ -28,7 +50,7 @@ const getProducts = async (tag) => {
   return data;
 };
 
-// F-14 - fetch the four Medusa seed products through the temporary Express proxy
+// F-14 - fetch the home catalogue selection through the Express proxy
 const getMedusaHomeProducts = async () => {
   const res = await fetch("/medusa-home-products");
 
@@ -48,12 +70,14 @@ const getMedusaHomeProducts = async () => {
 // create product slider
 const createProductSlider = (data, parent, title) => {
   let slideContainer = document.querySelector(`${parent}`);
+  const isHomeCatalogue = title === "Catalogue";
+  const isRecommendationSlider = title === "similar products";
 
   slideContainer.innerHTML += `
-    <section class="product">
+    <section class="product${isHomeCatalogue ? " catalogue-slider" : ""}${isRecommendationSlider ? " recommendation-slider" : ""}">
         <h2 class="product-category">${title}</h2>
-        <button class="pre-btn"><img src="../img/arrow.png" alt=""></button>
-        <button class="nxt-btn"><img src="../img/arrow.png" alt=""></button>
+        <button class="pre-btn" type="button" aria-label="Voir les produits précédents"><img src="../img/arrow.png" alt=""></button>
+        <button class="nxt-btn" type="button" aria-label="Voir les produits suivants"><img src="../img/arrow.png" alt=""></button>
         ${createCard(data)}
     </section>
     `;
@@ -81,16 +105,25 @@ const createCard = (data, parent) => {
       const actualPrice = discount > 0
         ? `<span class="actual-price">${formatPrice(data[i].actualPrice)}</span>`
         : "";
+      const category = data[i].category
+        ? `<p class="product-short-des">${data[i].category}</p>`
+        : "";
+      const brand = data[i].brand
+        ? `<h2 class="product-brand">${data[i].brand}</h2>`
+        : "";
+
+      const loading = i < 6 ? "eager" : "lazy";
+      const fetchPriority = i < 4 ? ' fetchpriority="high"' : "";
 
       middle += `
             <div class="product-card" onclick="location.href = '/products/${data[i].id}'">
                 <div class="product-image">
                     ${discountTag}
-                    <img src="${image}" class="product-thumb" alt="${data[i].name}">
+                    <img src="${image}" class="product-thumb" alt="${data[i].name}" loading="${loading}" decoding="async"${fetchPriority}>
                 </div>
                 <div class="product-info" >
-                    <h2 class="product-brand">${data[i].name}</h2>
-                    <p class="product-short-des">${data[i].shortDes}</p>
+                    ${category}
+                    ${brand}
                     <span class="price">${formatPrice(data[i].sellPrice)}</span> ${actualPrice}
                 </div>
             </div>
@@ -117,28 +150,4 @@ const showHomeCatalogueState = (parent) => {
       </div>
     </section>
   `;
-};
-
-const addProductToWishlist = (product, selection = {}) => {
-  let data = JSON.parse(localStorage.getItem("wishlist"));
-  if (data == null) {
-    data = [];
-  }
-
-  product = {
-    item: 1,
-    productId: product.id,
-    variantId: selection.variantId || null,
-    name: product.name,
-    sellPrice: selection.sellPrice ?? product.sellPrice,
-    size: selection.size || null,
-    color: selection.color || null,
-    shortDes: product.shortDes,
-    image: product.images?.[0] || product.image,
-    currencyCode: selection.currencyCode || product.currencyCode || null,
-  };
-
-  data.push(product);
-  localStorage.setItem("wishlist", JSON.stringify(data));
-  return "added";
 };

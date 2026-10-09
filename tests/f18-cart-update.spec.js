@@ -21,9 +21,7 @@ test("F-18 - modifier puis supprimer une ligne du Cart Medusa", async ({ page })
   const variant = product.variants.find((item) => item.available && item.price);
 
   for (const option of variant.options) {
-    await page.locator(`.product-option-group[data-option-id="${option.optionId}"] .option-radio-btn`, {
-      hasText: option.value,
-    }).click();
+    await page.locator(`.product-option-group[data-option-id="${option.optionId}"] .option-radio-btn[data-option-value="${option.value}"]`).click();
   }
 
   await page.locator(".cart-btn").click();
@@ -48,7 +46,7 @@ test("F-18 - modifier puis supprimer une ligne du Cart Medusa", async ({ page })
   expect(incrementedCart.items[0].quantity).toBe(2);
   await expect(page.locator(`[data-line-id="${lineId}"] .item-count`)).toHaveText("2");
   await expect(page.locator(".bill")).toHaveText(
-    new Intl.NumberFormat("fr-FR", { style: "currency", currency: incrementedCart.currency_code }).format(Number(incrementedCart.total))
+    new Intl.NumberFormat("fr-FR", { style: "currency", currency: incrementedCart.currency_code }).format(Number(incrementedCart.item_subtotal))
   );
 
   const decrementResponsePromise = page.waitForResponse((response) => (
@@ -61,7 +59,7 @@ test("F-18 - modifier puis supprimer une ligne du Cart Medusa", async ({ page })
   expect(decrementedCart.items[0].quantity).toBe(1);
   await expect(page.locator(`[data-line-id="${lineId}"] .item-count`)).toHaveText("1");
   await expect(page.locator(".bill")).toHaveText(
-    new Intl.NumberFormat("fr-FR", { style: "currency", currency: decrementedCart.currency_code }).format(Number(decrementedCart.total))
+    new Intl.NumberFormat("fr-FR", { style: "currency", currency: decrementedCart.currency_code }).format(Number(decrementedCart.item_subtotal))
   );
 
   const deleteResponsePromise = page.waitForResponse((response) => (

@@ -29,6 +29,85 @@ const checkoutRegressionCart = ({ quantity = 1, shippingOptionId, shippingTotal 
   };
 };
 
+test("F-05 - le Panier ignore une ancienne livraison jusqu'au choix Checkout courant", async ({ page }) => {
+  const cartId = "cart_checkout_shipping_reset";
+  const standardOption = { id: "so_standard", name: "Standard Shipping", amount: 0 };
+  const expressOption = { id: "so_express", name: "Express Shipping", amount: 10 };
+  const products = [
+    { id: "line_hoodie", product_title: "Metro Zip Hoodie", variant_title: "M", thumbnail: "/img/no image.png", quantity: 1, unit_price: 89, total: 89 },
+    { id: "line_cap", product_title: "DS Five Panel Cap", variant_title: "Noir", thumbnail: "/img/no image.png", quantity: 1, unit_price: 35, total: 35 },
+  ];
+  let currentCart = {
+    id: cartId,
+    currency_code: "eur",
+    items: products,
+    item_subtotal: 124,
+    shipping_total: 10,
+    discount_total: 0,
+    tax_total: 0,
+    total: 134,
+    shipping_methods: [{ shipping_option_id: expressOption.id }],
+  };
+
+  await page.addInitScript(({ cartId }) => {
+    sessionStorage.setItem("user", JSON.stringify({ name: "Checkout test", email: "checkout@example.com", seller: false }));
+    localStorage.setItem("medusa_cart_id", cartId);
+  }, { cartId });
+  await page.route(`**/medusa-cart/${cartId}`, (route) => route.fulfill({
+    status: 200,
+    contentType: "application/json",
+    body: JSON.stringify({ cart: currentCart }),
+  }));
+  await page.route(`**/medusa-checkout/${cartId}/reset`, (route) => {
+    currentCart = { ...currentCart, shipping_total: 0, total: 124, shipping_methods: [] };
+    return route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({ cart: currentCart, shippingOptions: [standardOption, expressOption], stripeCheckoutAvailable: true }),
+    });
+  });
+  await page.route(`**/medusa-checkout/${cartId}/shipping`, (route) => {
+    const { shippingOptionId } = route.request().postDataJSON();
+    const shippingTotal = shippingOptionId === expressOption.id ? 10 : 0;
+    currentCart = {
+      ...currentCart,
+      shipping_total: shippingTotal,
+      total: currentCart.item_subtotal + shippingTotal,
+      shipping_methods: [{ shipping_option_id: shippingOptionId }],
+    };
+    return route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ cart: currentCart }) });
+  });
+
+  await page.goto("/cart");
+  await expect(page.locator(".cart .sm-product")).toHaveCount(2);
+  await expect(page.locator(".bill")).toHaveText(formatCartPrice(124));
+
+  await page.goto("/checkout");
+  const standardInput = page.locator(`.shipping-option input[value="${standardOption.id}"]`);
+  const expressInput = page.locator(`.shipping-option input[value="${expressOption.id}"]`);
+  await expect(standardInput).not.toBeChecked();
+  await expect(expressInput).not.toBeChecked();
+  await expect(page.locator('[data-summary="total"]')).toHaveText(formatCartPrice(124));
+
+  await page.locator("#last_name").fill("Checkout");
+  await page.locator("#first_name").fill("Test");
+  await page.locator("#address").fill("10 rue du Test");
+  await page.locator("#street").fill("Rue du Test");
+  await page.locator("#city").fill("La Rochelle");
+  await page.locator("#state").fill("Charente-Maritime");
+  await page.locator("#pincode").fill("17000");
+  await expressInput.click();
+  await expect(expressInput).toBeChecked();
+  await expect(page.locator('[data-summary="total"]')).toHaveText(formatCartPrice(134));
+
+  await page.goto("/checkout");
+  await expect(standardInput).not.toBeChecked();
+  await expect(expressInput).not.toBeChecked();
+  await expect(page.locator("#last_name")).toHaveValue("");
+  await expect(page.locator('[data-summary="total"]')).toHaveText(formatCartPrice(124));
+  await expect(page.locator(".cart .sm-product")).toHaveCount(2);
+});
+
 test("F-05 - collecte l'identité de livraison sans billing storefront", async ({ page }) => {
   await page.goto("/");
   await page.evaluate(() => {
@@ -54,9 +133,9 @@ test("F-05 - collecte l'identité de livraison sans billing storefront", async (
     return { cart, productName: product.name };
   });
 
-  const checkoutCart = {
+  let checkoutCart = {
     ...cartSetup.cart,
-    shipping_methods: [{ shipping_option_id: "so_standard" }],
+    shipping_methods: [],
   };
 
   await page.route("https://js.stripe.com/**", (route) => route.fulfill({
@@ -69,6 +148,20 @@ test("F-05 - collecte l'identité de livraison sans billing storefront", async (
   }));
   await page.route("**/medusa-checkout/**", async (route) => {
     const request = route.request();
+    if (request.url().endsWith("/reset")) {
+      checkoutCart = { ...checkoutCart, shipping_methods: [] };
+      return route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({
+          cart: checkoutCart,
+          shippingOptions: [{ id: "so_standard", name: "Standard Shipping", amount: 0 }],
+          stripeAvailable: true,
+          stripeCheckoutAvailable: true,
+          stripePublishableKey: "pk_test_playwright",
+        }),
+      });
+    }
     if (request.method() === "GET") {
       return route.fulfill({
         status: 200,
@@ -80,6 +173,15 @@ test("F-05 - collecte l'identité de livraison sans billing storefront", async (
           stripeCheckoutAvailable: true,
           stripePublishableKey: "pk_test_playwright",
         }),
+      });
+    }
+    if (request.url().endsWith("/shipping")) {
+      const { shippingOptionId } = request.postDataJSON();
+      checkoutCart = { ...checkoutCart, shipping_methods: [{ shipping_option_id: shippingOptionId }] };
+      return route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({ cart: checkoutCart }),
       });
     }
     if (request.url().endsWith("/stripe-checkout")) {
@@ -111,7 +213,8 @@ test("F-05 - collecte l'identité de livraison sans billing storefront", async (
   await expect(page.locator("#billing-same-as-shipping")).toHaveCount(0);
   await expect(page.locator("#billing-address-section")).toHaveCount(0);
   await expect(page.getByText("Billing address same as delivery address", { exact: true })).toHaveCount(0);
-  await expect(page.locator(".shipping-option input")).toBeChecked();
+  const standardInput = page.locator('.shipping-option input[value="so_standard"]');
+  await expect(standardInput).not.toBeChecked();
 
   await page.locator(".place-order-btn").click();
   await expect(page.locator("#last_name-error")).toHaveText("This field is required.");
@@ -124,6 +227,8 @@ test("F-05 - collecte l'identité de livraison sans billing storefront", async (
   await page.locator("#city").fill("La Rochelle");
   await page.locator("#state").fill("Charente-Maritime");
   await page.locator("#pincode").fill("17000");
+  await standardInput.click();
+  await expect(standardInput).toBeChecked();
 
   const checkoutRequestPromise = page.waitForRequest(
     (request) => request.url().endsWith(`/medusa-checkout/${cartSetup.cart.id}/stripe-checkout`)
@@ -154,6 +259,13 @@ test("F-05 - collecte l'identité de livraison sans billing storefront", async (
   expect(body.items).toBeUndefined();
   expect(body.total).toBeUndefined();
   await expect(page).toHaveURL("https://checkout.stripe.com/c/pay/cs_test_playwright");
+
+  await page.goto("/checkout?payment_cancelled=true");
+  await expect(standardInput).not.toBeChecked();
+  await expect(page.locator("#last_name")).toHaveValue("");
+  await expect(page.locator("#address")).toHaveValue("");
+  await expect(page.locator(".cart .sm-product")).toHaveCount(1);
+  await expect(page.locator(".checkout-status")).toHaveText("Payment was canceled. Your cart is unchanged.");
 });
 
 test("F-05 - synchronise livraison, quantités, totaux Medusa et erreurs de checkout", async ({ page }) => {
@@ -162,6 +274,7 @@ test("F-05 - synchronise livraison, quantités, totaux Medusa et erreurs de chec
   const expressOption = { id: "so_express", name: "Express Shipping", amount: 7 };
   let currentCart = checkoutRegressionCart();
   let expressAttempts = 0;
+  let checkoutResets = 0;
 
   await page.addInitScript(({ cartId }) => {
     sessionStorage.setItem("user", JSON.stringify({
@@ -200,6 +313,19 @@ test("F-05 - synchronise livraison, quantités, totaux Medusa et erreurs de chec
       stripeCheckoutAvailable: true,
     }),
   }));
+  await page.route(`**/medusa-checkout/${cartId}/reset`, (route) => {
+    checkoutResets += 1;
+    currentCart = checkoutRegressionCart({ quantity: currentCart.items[0].quantity });
+    return route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({
+        cart: currentCart,
+        shippingOptions: [standardOption, expressOption],
+        stripeCheckoutAvailable: true,
+      }),
+    });
+  });
   await page.route(`**/medusa-checkout/${cartId}/shipping`, (route) => {
     const { shippingOptionId } = route.request().postDataJSON();
     if (shippingOptionId === expressOption.id && expressAttempts++ === 0) {
@@ -292,6 +418,15 @@ test("F-05 - synchronise livraison, quantités, totaux Medusa et erreurs de chec
   await summary("tax_total", (await expressCart).tax_total);
   await summary("total", (await expressCart).total);
 
+  const restoredStandardResponse = page.waitForResponse((response) => (
+    response.url().endsWith(`/medusa-checkout/${cartId}/shipping`) && response.status() === 200
+  ));
+  await standardInput.click();
+  const restoredStandardCart = (await restoredStandardResponse).json().then((data) => data.cart);
+  await expect(standardInput).toBeChecked();
+  await expect(expressInput).not.toBeChecked();
+  expect((await restoredStandardCart).shipping_methods).toEqual([{ shipping_option_id: standardOption.id }]);
+
   const incrementResponse = page.waitForResponse((response) => (
     response.url().endsWith(`/medusa-cart/${cartId}/items/line_checkout_regression`) && response.request().method() === "PATCH"
   ));
@@ -313,5 +448,34 @@ test("F-05 - synchronise livraison, quantités, totaux Medusa et erreurs de chec
   await summary("subtotal", (await decrementedCart).item_subtotal);
   await summary("shipping_total", (await decrementedCart).shipping_total);
   await summary("total", (await decrementedCart).total);
-  expect(await page.evaluate(() => window.currentMedusaCart.shipping_methods[0].shipping_option_id)).toBe(expressOption.id);
+  expect(await page.evaluate(() => window.currentMedusaCart.shipping_methods[0].shipping_option_id)).toBe(standardOption.id);
+
+  const selectExpressResponse = page.waitForResponse((response) => (
+    response.url().endsWith(`/medusa-checkout/${cartId}/shipping`) && response.status() === 200
+  ));
+  await expressInput.click();
+  await selectExpressResponse;
+  await expect(expressInput).toBeChecked();
+
+  await page.evaluate(() => {
+    window.dispatchEvent(new PageTransitionEvent("pageshow", { persisted: true }));
+  });
+  await expect(standardInput).not.toBeChecked();
+  await expect(expressInput).not.toBeChecked();
+  await expect(page.locator("#last_name")).toHaveValue("");
+  await expect(page.locator(".cart .sm-product")).toHaveCount(1);
+
+  await page.reload();
+  await expect(standardInput).not.toBeChecked();
+  await expect(expressInput).not.toBeChecked();
+  await expect(page.locator("#last_name")).toHaveValue("");
+  await expect(page.locator("#address")).toHaveValue("");
+  await expect(page.locator(".cart .sm-product")).toHaveCount(1);
+
+  await page.goto("/cart");
+  await page.goto("/checkout");
+  await expect(standardInput).not.toBeChecked();
+  await expect(expressInput).not.toBeChecked();
+  await expect(page.locator("#first_name")).toHaveValue("");
+  expect(checkoutResets).toBeGreaterThanOrEqual(3);
 });

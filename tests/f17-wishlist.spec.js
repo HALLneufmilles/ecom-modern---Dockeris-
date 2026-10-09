@@ -1,69 +1,110 @@
 const { test, expect } = require("@playwright/test");
 
-test("F-17 - ajouter un produit à la wishlist et l'afficher", async ({ page }) => {
-  // 1. Initialiser proprement le stockage navigateur.
-  await page.goto("/");
+const signup = async (page, email, password) => {
+  await page.goto("/signup");
+  await page.locator("#name").fill("Wishlist Test");
+  await page.locator("#email").fill(email);
+  await page.locator("#password").fill(password);
+  await page.locator("#number").fill("0612345678");
+  await page.locator(".submit-btn").click();
+  await expect(page).toHaveURL(/\/$/);
+};
 
+const login = async (page, email, password) => {
+  await page.goto("/login");
+  await page.locator("#email").fill(email);
+  await page.locator("#password").fill(password);
+  await page.locator(".submit-btn").click();
+  await expect(page).toHaveURL(/\/$/);
+};
+
+test("F-17 - wishlist Customer persistante au niveau Product", async ({ page }) => {
+  test.skip(process.env.MVDW_FEATURE_WISHLIST === "false", "Ce scénario requiert wishlist=true.");
+
+  const email = `wishlist-${Date.now()}@example.test`;
+  const password = "Wishlist123!";
+
+  await page.goto("/");
   await page.evaluate(() => {
-    localStorage.setItem("wishlist", JSON.stringify([]));
+    localStorage.setItem("wishlist", JSON.stringify([{ productId: "legacy" }]));
     sessionStorage.clear();
   });
 
-  // 2. Trouver un vrai produit.
-  await page.goto("/search/Medusa");
+  const anonymousWishlist = await page.request.get("/medusa-wishlist");
+  expect(anonymousWishlist.status()).toBe(401);
+  await expect(anonymousWishlist.json()).resolves.toEqual({ error: "authentication_required" });
 
-  const firstProduct = page.locator(".card-container .product-card").first();
+  await signup(page, email, password);
+  expect(await page.evaluate(() => localStorage.getItem("wishlist"))).toBeNull();
 
-  await expect(firstProduct).toBeVisible();
+  const productId = await page.evaluate(async () => {
+    const products = await fetch("/medusa-home-products").then((response) => response.json());
+    for (const product of products) {
+      const detail = await fetch(`/medusa-products/${product.id}`).then((response) => response.json());
+      if (detail.source === "medusa" && detail.options.some((option) => (
+        ["size", "taille"].includes(option.title.toLowerCase())
+      ))) return detail.id;
+    }
+    return null;
+  });
+  expect(productId).not.toBeNull();
 
-  await firstProduct.click();
-
-  await expect(page).toHaveURL(/\/products\/.+/);
-
-  // 3. Attendre le chargement de la fiche.
-  const productName = page.locator(".product-details .product-brand");
-
-  await expect(productName).not.toHaveText("");
-
-  const name = (await productName.textContent()).trim();
-
-  // 4. Choisir les options réellement disponibles du produit Medusa.
-  const availableColor = page.locator(".color-radio-btn:visible").first();
-
-  await expect(availableColor).toBeVisible();
-  await availableColor.click();
-
-  const availableSize = page.locator(".size-radio-btn:visible").first();
-
-  await expect(availableSize).toBeVisible();
-
-  const selectedSize = (await availableSize.textContent()).trim();
-
-  await availableSize.click();
-
-  // 5. Ajouter à la wishlist.
+  await page.goto(`/products/${productId}`);
   const wishlistButton = page.locator(".wishlist-btn");
+  await expect(wishlistButton).toBeVisible();
 
+  await page.locator(".cart-btn").click();
+  await expect(page.locator(".size-radio-btn.uncheck").first()).toBeVisible();
+
+  const wishlistRequest = page.waitForRequest((request) => (
+    request.url().endsWith("/medusa-wishlist/items") && request.method() === "POST"
+  ));
   await wishlistButton.click();
+  const request = await wishlistRequest;
 
+  expect(request.postDataJSON()).toEqual({ productId });
   await expect(wishlistButton).toHaveText("added");
+  expect(await page.evaluate(() => localStorage.getItem("wishlist"))).toBeNull();
 
-  // 6. Vérifier le contenu réellement enregistré.
-  const wishlist = await page.evaluate(() => JSON.parse(localStorage.getItem("wishlist")));
+  const savedWishlist = await page.evaluate(async () => (
+    fetch("/medusa-wishlist").then((response) => response.json())
+  ));
+  expect(savedWishlist.wishlist.items).toEqual(expect.arrayContaining([
+    expect.objectContaining({ product: expect.objectContaining({ id: productId }) }),
+  ]));
 
-  expect(Array.isArray(wishlist)).toBe(true);
-  expect(wishlist).toHaveLength(1);
+  await page.reload();
+  const reloadedWishlist = await page.evaluate(async () => (
+    fetch("/medusa-wishlist").then((response) => response.json())
+  ));
+  expect(reloadedWishlist.wishlist.items).toHaveLength(1);
 
-  expect(wishlist[0].name).toBe(name);
-  expect(wishlist[0].size).toBe(selectedSize);
-  expect(Number(wishlist[0].item)).toBe(1);
+  await page.locator("#user-img").click();
+  await page.locator("#user-btn").click();
+  await expect(page.locator("#user-btn")).toHaveText(/log in/i);
+  await login(page, email, password);
 
-  // 7. Ouvrir la page panier, qui affiche aussi la wishlist.
   await page.goto("/cart");
-
   const wishlistProduct = page.locator(".wishlist .sm-product").first();
-
   await expect(wishlistProduct).toBeVisible();
+  await expect(wishlistProduct.locator(".sm-product-name")).not.toHaveText("");
 
-  await expect(wishlistProduct.locator(".sm-product-name")).toHaveText(name);
+  const deleteResponse = page.waitForResponse((response) => (
+    /\/medusa-wishlist\/items\/[^/]+$/.test(new URL(response.url()).pathname)
+    && response.request().method() === "DELETE"
+  ));
+  await wishlistProduct.locator(".sm-delete-btn").click();
+  expect((await deleteResponse).status()).toBe(204);
+  await expect(page.locator(".wishlist .empty-img")).toBeVisible();
+});
+
+test("F-17 - wishlist désactivée", async ({ page }) => {
+  test.skip(process.env.MVDW_FEATURE_WISHLIST !== "false", "Exécuter ce scénario avec MVDW_FEATURE_WISHLIST=false.");
+
+  await page.goto("/cart");
+  await expect(page.locator(".wishlist-section")).toBeHidden();
+
+  const response = await page.request.get("/medusa-wishlist");
+  expect(response.status()).toBe(404);
+  await expect(response.json()).resolves.toEqual({ error: "wishlist_disabled" });
 });

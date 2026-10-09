@@ -4,6 +4,8 @@ const admin = require("firebase-admin");
 const bcrypt = require("bcrypt");
 const path = require("path");
 const dotenv = require("dotenv");
+const { storefrontConfig, isStorefrontFeatureEnabled } = require("./public/js/storefront-features");
+const { selectCategoryRecommendations } = require("./recommendations");
 
 dotenv.config();
 // firebase admin setup
@@ -128,6 +130,15 @@ const getMedusaStoreConfig = () => ({
   publishableApiKey: process.env.MEDUSA_PUBLISHABLE_API_KEY,
 });
 
+const isStorefrontFeatureActive = (feature) => isStorefrontFeatureEnabled(storefrontConfig, feature);
+const isWishlistFeatureEnabled = () => process.env.MVDW_FEATURE_WISHLIST !== "false";
+
+app.get("/storefront-config.js", (req, res) => {
+  res.type("application/javascript");
+  res.set("Cache-Control", "no-store");
+  return res.send(`window.storefrontRuntimeConfig = Object.freeze({ features: Object.freeze({ wishlist: ${isWishlistFeatureEnabled()} }) });`);
+});
+
 const fetchMedusaStore = async (pathname, { method = "GET", body, token, timeout = 5000 } = {}) => {
   const { backendUrl, publishableApiKey } = getMedusaStoreConfig();
   const url = new URL(pathname, backendUrl);
@@ -170,10 +181,25 @@ const getVariantOptionValue = (variantOption) => ({
 });
 
 const mapMedusaProduct = (product, regionId) => {
-  const productImages = product.images?.map((image) => image.url).filter(Boolean) || [];
+  const productImageRecords = (product.images || []).filter((image) => image?.id && image?.url);
+  const productImages = productImageRecords.map((image) => image.url);
+  const productImagesById = new Map(productImageRecords.map((image) => [image.id, image]));
+  const mediaByColor = Object.fromEntries(
+    Object.entries(product.metadata?.media_by_color || {}).map(([color, gallery]) => [
+      color,
+      Array.isArray(gallery?.image_ids)
+        ? gallery.image_ids.map((imageId) => productImagesById.get(imageId)).filter(Boolean)
+        : [],
+    ])
+  );
   const variants = (product.variants || []).map((variant) => {
     const price = variant.calculated_price;
     const inventoryQuantity = variant.inventory_quantity;
+    const variantImages = (variant.images || []).map((image) => image.url).filter(Boolean);
+    const hasVariantSpecificImages = variantImages.length > 0 && (
+      variantImages.length !== productImages.length
+      || variantImages.some((image) => !productImages.includes(image))
+    );
     const available = variant.manage_inventory === false
       || variant.allow_backorder === true
       || Number(inventoryQuantity) > 0;
@@ -182,6 +208,7 @@ const mapMedusaProduct = (product, regionId) => {
       id: variant.id,
       title: variant.title,
       sku: variant.sku,
+      images: hasVariantSpecificImages ? variantImages : [],
       options: (variant.options || []).map(getVariantOptionValue),
       price: price ? {
         amount: Number(price.calculated_amount),
@@ -216,11 +243,25 @@ const mapMedusaProduct = (product, regionId) => {
     shortDes: product.subtitle || product.description || "",
     des: product.description || "",
     images: productImages.length ? productImages : [product.thumbnail].filter(Boolean),
+    mediaByColor,
     thumbnail: product.thumbnail,
     options,
     variants,
     tags: (product.tags || []).map((tag) => tag.value).filter(Boolean),
   };
+};
+
+const getMostSpecificCategoryName = (categories = []) => {
+  const mostSpecificCategory = categories
+    .filter((category) => category?.name)
+    .reduce((current, category) => {
+      const currentDepth = current?.mpath?.split(".").length || 0;
+      const categoryDepth = category.mpath?.split(".").length || 0;
+
+      return categoryDepth > currentDepth ? category : current;
+    }, null);
+
+  return mostSpecificCategory?.name || null;
 };
 
 const mapMedusaCatalogueCard = (product) => {
@@ -237,7 +278,10 @@ const mapMedusaCatalogueCard = (product) => {
   return {
     id: product.id,
     name: product.title,
-    shortDes: product.subtitle || product.description || "",
+    category: getMostSpecificCategoryName(product.categories),
+    brand: typeof product.metadata?.brand === "string" && product.metadata.brand.trim()
+      ? product.metadata.brand
+      : null,
     image: product.thumbnail || product.images?.[0]?.url || "/img/no image.png",
     sellPrice,
     actualPrice,
@@ -248,7 +292,47 @@ const mapMedusaCatalogueCard = (product) => {
   };
 };
 
-// F-14 - temporary proxy from the current storefront to the Medusa Store API
+const getMedusaProductsForCategories = async (categoryIds, regionId, backendUrl) => {
+  const productsUrl = new URL("/store/products", backendUrl);
+  categoryIds.forEach((categoryId) => productsUrl.searchParams.append("category_id[]", categoryId));
+  productsUrl.searchParams.set("region_id", regionId);
+  productsUrl.searchParams.set("limit", "100");
+  productsUrl.searchParams.set("fields", "*categories,+metadata");
+
+  const data = await fetchMedusaStore(productsUrl.pathname + productsUrl.search);
+
+  if (!Array.isArray(data.products)) {
+    throw new Error("Medusa Store API returned an invalid product list");
+  }
+
+  return data.products;
+};
+
+const getMedusaRecommendations = async (productId, regionId, backendUrl) => {
+  const productUrl = new URL(`/store/products/${encodeURIComponent(productId)}`, backendUrl);
+  productUrl.searchParams.set("region_id", regionId);
+  productUrl.searchParams.set("fields", "*categories");
+
+  const [productData, categoriesData] = await Promise.all([
+    fetchMedusaStore(productUrl.pathname + productUrl.search),
+    fetchMedusaStore("/store/product-categories?limit=100"),
+  ]);
+  const currentProduct = productData.product;
+  const categories = categoriesData.product_categories;
+
+  if (!currentProduct || !Array.isArray(categories)) {
+    throw new Error("Medusa Store API returned invalid recommendation data");
+  }
+
+  return selectCategoryRecommendations({
+    currentProduct,
+    categories,
+    loadProductsForCategories: (categoryIds) => getMedusaProductsForCategories(categoryIds, regionId, backendUrl),
+    mapProduct: mapMedusaCatalogueCard,
+  });
+};
+
+// F-14 - home catalogue from the Medusa Store API
 app.get("/medusa-home-products", async (req, res) => {
   const { publishableApiKey } = getMedusaStoreConfig();
 
@@ -260,13 +344,17 @@ app.get("/medusa-home-products", async (req, res) => {
     const { backendUrl } = getMedusaStoreConfig();
     const regionId = await getDefaultMedusaRegionId();
     const productsUrl = new URL("/store/products", backendUrl);
-    productsUrl.searchParams.set("limit", "4");
+    // The storefront renders the current demonstration catalogue in one scrollable list.
+    // Product data stays lightweight; card images are deferred by the browser in the UI.
+    productsUrl.searchParams.set("limit", "100");
+    productsUrl.searchParams.set("order", "-created_at");
     productsUrl.searchParams.set("region_id", regionId);
+    productsUrl.searchParams.set("fields", "*categories,+metadata");
     const productsData = await fetchMedusaStore(productsUrl.pathname + productsUrl.search);
     const medusaProducts = productsData.products;
 
-    if (!Array.isArray(medusaProducts) || medusaProducts.length !== 4) {
-      throw new Error("The Medusa seed catalogue does not contain exactly four products");
+    if (!Array.isArray(medusaProducts)) {
+      throw new Error("Medusa Store API returned an invalid product list");
     }
 
     const products = medusaProducts.map(mapMedusaCatalogueCard);
@@ -312,6 +400,29 @@ app.get("/medusa-search-products", async (req, res) => {
   }
 });
 
+// F-16 - category-based product recommendations from the Medusa Store API.
+app.get("/medusa-products/:id/recommendations", async (req, res) => {
+  if (!isStorefrontFeatureActive("recommendations")) {
+    return res.status(404).json({ error: "recommendations_disabled" });
+  }
+
+  const { publishableApiKey, backendUrl } = getMedusaStoreConfig();
+
+  if (!publishableApiKey) {
+    return res.status(503).json({ error: "catalogue_unavailable" });
+  }
+
+  try {
+    const regionId = await getDefaultMedusaRegionId();
+    const recommendations = await getMedusaRecommendations(req.params.id, regionId, backendUrl);
+    return res.json(recommendations);
+  } catch (error) {
+    console.error("F-16 Medusa recommendations unavailable:", error.message);
+    const status = error.status === 404 ? 404 : 502;
+    return res.status(status).json({ error: status === 404 ? "product_not_found" : "catalogue_unavailable" });
+  }
+});
+
 app.get("/medusa-products/:id", async (req, res) => {
   const { publishableApiKey, backendUrl } = getMedusaStoreConfig();
 
@@ -323,7 +434,7 @@ app.get("/medusa-products/:id", async (req, res) => {
     const regionId = await getDefaultMedusaRegionId();
     const productUrl = new URL(`/store/products/${encodeURIComponent(req.params.id)}`, backendUrl);
     productUrl.searchParams.set("region_id", regionId);
-    productUrl.searchParams.set("fields", "*variants.calculated_price,+variants.inventory_quantity");
+    productUrl.searchParams.set("fields", "*variants.images,*variants.calculated_price,+variants.inventory_quantity,+metadata");
 
     const data = await fetchMedusaStore(productUrl.pathname + productUrl.search);
     return res.json(mapMedusaProduct(data.product, regionId));
@@ -466,6 +577,119 @@ const addMedusaCartItem = async (cartId, variantId, quantity, token) => {
   return data.cart;
 };
 
+const requireWishlistToken = (req, res) => {
+  if (!isWishlistFeatureEnabled()) {
+    res.status(404).json({ error: "wishlist_disabled" });
+    return null;
+  }
+
+  const token = getMedusaCustomerToken(req);
+  if (!token) {
+    res.status(401).json({ error: "authentication_required" });
+    return null;
+  }
+
+  return token;
+};
+
+const sendWishlistError = (res, error) => {
+  if (error.status === 401) {
+    return res.status(401).json({ error: "authentication_required" });
+  }
+
+  if (error.status === 404) {
+    return res.status(404).json({ error: "wishlist_not_found" });
+  }
+
+  return res.status(502).json({ error: "wishlist_unavailable" });
+};
+
+const retrieveWishlistCatalogueProduct = async (productId, regionId) => {
+  const { backendUrl } = getMedusaStoreConfig();
+  const productUrl = new URL(`/store/products/${encodeURIComponent(productId)}`, backendUrl);
+  productUrl.searchParams.set("region_id", regionId);
+  productUrl.searchParams.set("fields", "*variants.images,*variants.calculated_price,+variants.inventory_quantity,+metadata");
+  const data = await fetchMedusaStore(productUrl.pathname + productUrl.search);
+  const product = mapMedusaProduct(data.product, regionId);
+  const priceVariant = product.variants.find((variant) => variant.available && variant.price)
+    || product.variants.find((variant) => variant.price)
+    || null;
+
+  return {
+    id: product.id,
+    name: product.name,
+    shortDes: product.shortDes,
+    image: product.images[0] || null,
+    price: priceVariant?.price || null,
+  };
+};
+
+app.get("/medusa-wishlist", async (req, res) => {
+  const token = requireWishlistToken(req, res);
+  if (!token) return;
+
+  try {
+    const data = await fetchMedusaStore("/store/customers/me/wishlist", { token });
+    const wishlist = data.wishlist;
+
+    if (!wishlist) {
+      return res.json({ wishlist: null });
+    }
+
+    const regionId = await getDefaultMedusaRegionId();
+    const items = (await Promise.all((wishlist.items || []).map(async (item) => {
+      try {
+        return {
+          id: item.id,
+          product: await retrieveWishlistCatalogueProduct(item.product_id, regionId),
+        };
+      } catch (error) {
+        if (error.status === 404) return null;
+        throw error;
+      }
+    }))).filter(Boolean);
+
+    return res.json({ wishlist: { id: wishlist.id, items } });
+  } catch (error) {
+    return sendWishlistError(res, error);
+  }
+});
+
+app.post("/medusa-wishlist/items", async (req, res) => {
+  const token = requireWishlistToken(req, res);
+  if (!token) return;
+
+  if (typeof req.body.productId !== "string" || !req.body.productId) {
+    return res.status(400).json({ error: "invalid_wishlist_item" });
+  }
+
+  try {
+    const data = await fetchMedusaStore("/store/customers/me/wishlist/items", {
+      method: "POST",
+      body: { product_id: req.body.productId },
+      token,
+    });
+    return res.status(201).json({ wishlistItem: data.wishlist_item });
+  } catch (error) {
+    return sendWishlistError(res, error);
+  }
+});
+
+app.delete("/medusa-wishlist/items/:itemId", async (req, res) => {
+  const token = requireWishlistToken(req, res);
+  if (!token) return;
+
+  try {
+    await fetchMedusaStore(`/store/customers/me/wishlist/items/${encodeURIComponent(req.params.itemId)}`, {
+      method: "DELETE",
+      token,
+    });
+    return res.status(204).end();
+  } catch (error) {
+    return sendWishlistError(res, error);
+  }
+});
+
 app.post("/medusa-cart/items", async (req, res) => {
   const { publishableApiKey } = getMedusaStoreConfig();
   const { cartId, variantId, quantity = 1 } = req.body;
@@ -591,13 +815,12 @@ const registerMedusaCustomer = async ({ name, email, password, number }) => {
 };
 
 const getLegacyAccountState = async (email) => {
-  const [user, saved, seller] = await Promise.all([
+  const [user, seller] = await Promise.all([
     db.collection("users").doc(email).get(),
-    db.collection("saved").doc(email).get(),
     db.collection("sellers").doc(email).get(),
   ]);
 
-  return { user, saved, seller };
+  return { user, seller };
 };
 
 const customerResponse = ({ customer, cart, legacy }) => ({
@@ -605,9 +828,6 @@ const customerResponse = ({ customer, cart, legacy }) => ({
   email: customer.email,
   seller: legacy.user.exists ? Boolean(legacy.user.data().seller) : false,
   tagsSeller: legacy.seller.exists ? legacy.seller.data().tagsSeller : null,
-  wishlist: legacy.saved.exists && Array.isArray(legacy.saved.data().wishlist)
-    ? legacy.saved.data().wishlist
-    : [],
   cartId: cart.id,
 });
 
@@ -694,58 +914,6 @@ app.get("/login", (req, res) => {
 //         });
 //       }
 //     });
-// });
-
-// app.post("/login", (req, res) => {
-//   let { email, password } = req.body;
-
-//   if (!email.length || !password.length) {
-//     return res.json({ alert: "fill all the inputs" });
-//   }
-
-//   const sellerPromise = db.collection("sellers").doc(email).get();
-
-//   const userPromise = db.collection("users").doc(email).get();
-
-//   const savedPromise = db.collection("saved").doc(email).get();
-
-//   Promise.all([userPromise, savedPromise, sellerPromise]).then(([user, saved, seller]) => {
-//     if (!user.exists) {
-//       // if email does not exists
-//       return res.json({ alert: "log in email does not exists" });
-//     } else {
-//       bcrypt.compare(password, user.data().password, (err, result) => {
-//         if (result) {
-//           let data = user.data();
-//           let response = {
-//             name: data.name,
-//             email: data.email,
-//             seller: data.seller,
-//           };
-//           if (seller.exists) {
-//             const sellerData = seller.data();
-//             response.tagsSeller = sellerData.tagsSeller;
-//           }
-//           if (saved.exists) {
-//             const savedData = saved.data();
-//             // console.log("saveData: ", savedData);
-//             const { cart, wishlist } = savedData;
-//             // console.log("cart: ", cart);
-//             // console.log("cawishlistrt: ", wishlist);
-//             response.cart = cart;
-//             response.wishlist = wishlist;
-//           } else {
-//             response.cart = [];
-//             response.wishlist = [];
-//           }
-//           // console.log("response: ", response);
-//           return res.json(response);
-//         } else {
-//           return res.json({ alert: "password is incorrect" });
-//         }
-//       });
-//     }
-//   });
 // });
 
 app.post("/login", async (req, res) => {
@@ -1038,31 +1206,18 @@ app.get("/cart", (req, res) => {
   res.sendFile(path.join(staticPath, "cart.html"));
 });
 
-app.post("/save-user-state", (req, res) => {
-  const { email, wishlist, tagsSeller } = req.body;
-  const docName = email;
-  const savedState = { wishlist: Array.isArray(wishlist) ? wishlist : [] };
+app.post("/save-user-state", async (req, res) => {
+  const { email, tagsSeller } = req.body;
 
-  const promises = [];
-
-  promises.push(db.collection("saved").doc(docName).set(savedState));
-
-  // Mise à jour de la collection "sellers"
-  if (tagsSeller) {
-    promises.push(
-      db.collection("sellers").doc(docName).set({ tagsSeller }, { merge: true })
-    );
+  try {
+    if (tagsSeller) {
+      await db.collection("sellers").doc(email).set({ tagsSeller }, { merge: true });
+    }
+    return res.json("saved");
+  } catch (error) {
+    console.error(error);
+    return res.json("some error occurred in save. Try again");
   }
-
-  // Exécution de toutes les promises
-  Promise.all(promises)
-    .then(() => {
-      res.json("saved");
-    })
-    .catch((err) => {
-      console.error(err);
-      res.json("some error occurred in save. Try again");
-    });
 });
 
 // app.post("/tagsSeller", (req, res) => {
@@ -1139,6 +1294,28 @@ const retrieveShippingOptions = async (cartId, token) => {
   const query = new URLSearchParams({ cart_id: cartId });
   const data = await fetchMedusaStore(`/store/shipping-options?${query}`, { token });
   return data.shipping_options || [];
+};
+
+const replaceMedusaCartShippingMethod = async (cartId, shippingOptionId, token) => {
+  const encodedCartId = encodeURIComponent(cartId);
+
+  await fetchMedusaStore(`/store/carts/${encodedCartId}/shipping-methods/replace`, {
+    method: "POST",
+    token,
+  });
+  await fetchMedusaStore(`/store/carts/${encodedCartId}/shipping-methods`, {
+    method: "POST",
+    body: { option_id: shippingOptionId },
+    token,
+  });
+};
+
+const resetMedusaCartCheckout = async (cartId, token) => {
+  const encodedCartId = encodeURIComponent(cartId);
+  await fetchMedusaStore(`/store/carts/${encodedCartId}/checkout/reset`, {
+    method: "POST",
+    token,
+  });
 };
 
 const retrievePaymentProviders = async (regionId, token) => {
@@ -1289,6 +1466,32 @@ app.get("/medusa-checkout/:cartId", async (req, res) => {
   }
 });
 
+app.post("/medusa-checkout/:cartId/reset", async (req, res) => {
+  try {
+    const { token, cart } = await requireCheckoutContext(req, req.params.cartId);
+    await resetMedusaCartCheckout(cart.id, token);
+
+    const updatedCart = await retrieveMedusaCart(cart.id, token);
+    const [shippingOptions, paymentProviders] = await Promise.all([
+      retrieveShippingOptions(updatedCart.id, token),
+      retrievePaymentProviders(updatedCart.region_id, token),
+    ]);
+
+    return res.json({
+      cart: updatedCart,
+      shippingOptions,
+      stripeAvailable: paymentProviders.some((provider) => provider.id === MEDUSA_STRIPE_PROVIDER_ID),
+      stripeCheckoutAvailable: paymentProviders.some(
+        (provider) => provider.id === MEDUSA_STRIPE_CHECKOUT_PROVIDER_ID
+      ),
+      stripePublishableKey: process.env.STRIPE_PUBLISHABLE_KEY || null,
+    });
+  } catch (error) {
+    console.error("Medusa checkout reset failed:", error.message);
+    return sendCheckoutError(res, error);
+  }
+});
+
 app.post("/medusa-checkout/:cartId/stripe-checkout", async (req, res) => {
   const address = normalizeCheckoutAddress(req.body.address);
   if (
@@ -1317,11 +1520,7 @@ app.post("/medusa-checkout/:cartId/stripe-checkout", async (req, res) => {
       return res.status(400).json({ error: "invalid_shipping_option" });
     }
 
-    await fetchMedusaStore(`/store/carts/${encodeURIComponent(cart.id)}/shipping-methods`, {
-      method: "POST",
-      body: { option_id: selectedShippingOption.id },
-      token,
-    });
+    await replaceMedusaCartShippingMethod(cart.id, selectedShippingOption.id, token);
 
     const updatedCart = await retrieveMedusaCart(cart.id, token);
     const paymentProviders = await retrievePaymentProviders(updatedCart.region_id, token);
@@ -1425,11 +1624,7 @@ app.post("/medusa-checkout/:cartId/shipping", async (req, res) => {
       return res.status(400).json({ error: "invalid_shipping_option" });
     }
 
-    await fetchMedusaStore(`/store/carts/${encodeURIComponent(cart.id)}/shipping-methods`, {
-      method: "POST",
-      body: { option_id: req.body.shippingOptionId },
-      token,
-    });
+    await replaceMedusaCartShippingMethod(cart.id, req.body.shippingOptionId, token);
 
     return res.json({ cart: await retrieveMedusaCart(cart.id, token) });
   } catch (error) {
@@ -1467,11 +1662,7 @@ app.post("/medusa-checkout/:cartId/prepare", async (req, res) => {
       return res.status(400).json({ error: "invalid_shipping_option" });
     }
 
-    await fetchMedusaStore(`/store/carts/${encodeURIComponent(cart.id)}/shipping-methods`, {
-      method: "POST",
-      body: { option_id: req.body.shippingOptionId },
-      token,
-    });
+    await replaceMedusaCartShippingMethod(cart.id, req.body.shippingOptionId, token);
 
     const paymentProviders = await retrievePaymentProviders(cart.region_id, token);
     if (!paymentProviders.some((provider) => provider.id === MEDUSA_STRIPE_PROVIDER_ID)) {

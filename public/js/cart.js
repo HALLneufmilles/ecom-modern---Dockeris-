@@ -9,7 +9,7 @@ const formatCartPrice = (amount, currencyCode) => {
 };
 
 const createSmallCard = (item, { mutable = false } = {}) => `
-  <div class="sm-product"${item.lineId ? ` data-line-id="${item.lineId}"` : ""}>
+  <div class="sm-product"${item.lineId ? ` data-line-id="${item.lineId}"` : ""}${item.wishlistItemId ? ` data-wishlist-item-id="${item.wishlistItemId}"` : ""}>
     <img src="${item.image || "img/no image.png"}" class="sm-product-img" alt="">
     <div class="sm-text">
       <p class="sm-product-name">${item.name || "Product"}</p>
@@ -64,7 +64,7 @@ const renderCart = (cart) => {
     items.forEach((item) => element.insertAdjacentHTML("beforeend", createSmallCard(item, { mutable: true })));
   }
 
-  document.querySelector(".bill").textContent = formatCartPrice(Number(cart.total || 0), cart.currency_code);
+  document.querySelector(".bill").textContent = formatCartPrice(Number(cart.item_subtotal || 0), cart.currency_code);
   bindCartEvents(cart.id);
   window.currentMedusaCart = cart;
   window.dispatchEvent(new CustomEvent("medusa-cart-updated", { detail: cart }));
@@ -138,33 +138,69 @@ const loadMedusaCart = async () => {
   }
 };
 
-const renderWishlist = () => {
+const renderWishlist = (wishlist) => {
   const element = document.querySelector(".wishlist");
   if (!element) return;
 
-  let wishlist = JSON.parse(localStorage.getItem("wishlist") || "[]");
   element.innerHTML = "";
-  if (!wishlist.length) {
+  if (!wishlist?.items?.length) {
     emptyList(element);
     return;
   }
 
-  wishlist.forEach((item, index) => {
+  wishlist.items.forEach((item) => {
+    const product = item.product;
     element.insertAdjacentHTML("beforeend", createSmallCard({
-      name: item.name,
-      shortDes: item.shortDes,
-      image: item.image,
-      quantity: Number(item.item),
-      unitPrice: Number(item.sellPrice),
-      currencyCode: item.currencyCode,
+      wishlistItemId: item.id,
+      name: product.name,
+      shortDes: product.shortDes,
+      image: product.image,
+      quantity: 1,
+      unitPrice: Number(product.price?.amount || 0),
+      currencyCode: product.price?.currencyCode,
     }));
-    element.lastElementChild.querySelector(".sm-delete-btn").addEventListener("click", () => {
-      wishlist = wishlist.filter((entry, itemIndex) => itemIndex !== index);
-      localStorage.setItem("wishlist", JSON.stringify(wishlist));
-      renderWishlist();
+    element.lastElementChild.querySelector(".sm-delete-btn").addEventListener("click", async () => {
+      const response = await fetch(`/medusa-wishlist/items/${encodeURIComponent(item.id)}`, {
+        method: "DELETE",
+      });
+
+      if (response.ok) {
+        await loadWishlist();
+      }
     });
   });
 };
 
+const loadWishlist = async () => {
+  const section = document.querySelector(".wishlist-section");
+  if (!section) return null;
+
+  if (window.storefrontConfig?.features?.wishlist !== true) {
+    section.hidden = true;
+    return null;
+  }
+
+  section.hidden = false;
+  try {
+    const response = await fetch("/medusa-wishlist");
+    if (response.status === 401) {
+      renderWishlist(null);
+      return null;
+    }
+
+    if (!response.ok) {
+      if (response.status === 404) section.hidden = true;
+      return null;
+    }
+
+    const data = await response.json();
+    renderWishlist(data.wishlist);
+    return data.wishlist;
+  } catch (error) {
+    renderWishlist(null);
+    return null;
+  }
+};
+
 window.medusaCartReady = loadMedusaCart();
-renderWishlist();
+window.medusaWishlistReady = loadWishlist();

@@ -1,4 +1,4 @@
-import { defineMiddlewares, MedusaRequest, MedusaResponse } from "@medusajs/framework/http"
+import { authenticate, defineMiddlewares, MedusaRequest, MedusaResponse } from "@medusajs/framework/http"
 import { MedusaError } from "@medusajs/framework/utils"
 import { deleteFilesWorkflow } from "@medusajs/medusa/core-flows"
 import {
@@ -101,6 +101,18 @@ export const trackAdminImageUploads = (
 
 export default defineMiddlewares({
   routes: [
+    {
+      matcher: "/store/customers/me/wishlist*",
+      middlewares: [authenticate("customer", ["bearer", "session"])],
+    },
+    {
+      matcher: "/store/carts/*/shipping-methods/replace",
+      middlewares: [authenticate("customer", ["bearer", "session"])],
+    },
+    {
+      matcher: "/store/carts/*/checkout/reset",
+      middlewares: [authenticate("customer", ["bearer", "session"])],
+    },
     {
       matcher: "/hooks/stripe-checkout",
       methods: ["POST"],

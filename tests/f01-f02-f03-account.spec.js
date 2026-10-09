@@ -44,7 +44,11 @@ test("F-01 / F-02 / F-03 - inscription, déconnexion et reconnexion", async ({ p
         body: JSON.stringify({ variantId: variant.id, quantity: 1 }),
       }).then((response) => response.json());
       localStorage.setItem("medusa_cart_id", cart.id);
-      return { id: cart.id, variantId: variant.id };
+      return {
+        id: cart.id,
+        variantId: variant.id,
+        itemSubtotal: Number(cart.item_subtotal),
+      };
     });
 
     // ---------------------------------
@@ -158,39 +162,66 @@ test("F-01 / F-02 / F-03 - inscription, déconnexion et reconnexion", async ({ p
     await page.locator("#pincode").fill("17000");
     await expect(page.locator(".shipping-option")).toHaveCount(2);
 
-    const standardResponsePromise = page.waitForResponse((response) => (
-      response.url().endsWith(`/medusa-checkout/${initialCart.id}/shipping`)
-      && response.request().method() === "POST"
-    ));
-    await page.locator(".shipping-option").filter({ hasText: "Standard Shipping" }).locator("input").click();
-    const standardResponse = await standardResponsePromise;
-    const standardCart = (await standardResponse.json()).cart;
+    const selectShipping = async (label) => {
+      const input = page.locator(".shipping-option").filter({ hasText: label }).locator("input");
+      const shippingOptionId = await input.inputValue();
+      const responsePromise = page.waitForResponse((response) => (
+        response.url().endsWith(`/medusa-checkout/${initialCart.id}/shipping`)
+        && response.request().method() === "POST"
+      ));
+      await input.click();
+      return {
+        cart: (await (await responsePromise).json()).cart,
+        shippingOptionId,
+      };
+    };
+    const expectCartTotals = (cart, shippingTotal) => {
+      expect(Number(cart.shipping_total)).toBe(shippingTotal);
+      expect(Number(cart.total)).toBe(
+        Number(cart.item_subtotal)
+        + Number(cart.shipping_total)
+        + Number(cart.tax_total || 0)
+        - Number(cart.discount_total || 0)
+      );
+    };
+    const { cart: standardCart, shippingOptionId: standardOptionId } = await selectShipping("Standard Shipping");
     expect(standardCart.shipping_address.first_name).toBe("Camille");
     expect(standardCart.shipping_address.last_name).toBe("Livraison");
     expect(standardCart.shipping_address.first_name).not.toBe("Playwright");
     expect(standardCart.shipping_address.last_name).not.toBe("Test");
-    expect(Number(standardCart.shipping_total)).toBe(0);
-    expect(Number(standardCart.total)).toBe(10);
+    expect(standardCart.shipping_methods).toHaveLength(1);
+    expect(standardCart.shipping_methods[0].shipping_option_id).toBe(standardOptionId);
+    expect(Number(standardCart.item_subtotal)).toBe(initialCart.itemSubtotal);
+    expectCartTotals(standardCart, 0);
+    expect(Number(standardCart.total)).toBe(Number(standardCart.item_subtotal));
     await expect(page.locator('[data-summary="shipping_total"]')).toHaveText("0,00 €");
-    await expect(page.locator('[data-summary="total"]')).toHaveText("10,00 €");
+    await expect(page.locator('[data-summary="total"]')).toHaveText(new Intl.NumberFormat("fr-FR", {
+      style: "currency",
+      currency: "EUR",
+    }).format(Number(standardCart.total)));
 
-    const expressResponsePromise = page.waitForResponse((response) => (
-      response.url().endsWith(`/medusa-checkout/${initialCart.id}/shipping`)
-      && response.request().method() === "POST"
-    ));
-    await page.locator(".shipping-option").filter({ hasText: "Express Shipping" }).locator("input").click();
-    const expressResponse = await expressResponsePromise;
-    const expressCart = (await expressResponse.json()).cart;
-    expect(Number(expressCart.shipping_total)).toBe(10);
-    expect(Number(expressCart.total)).toBe(20);
+    const { cart: expressCart, shippingOptionId: expressOptionId } = await selectShipping("Express Shipping");
+    expect(expressCart.shipping_methods).toHaveLength(1);
+    expect(expressCart.shipping_methods[0].shipping_option_id).toBe(expressOptionId);
+    expect(Number(expressCart.item_subtotal)).toBe(initialCart.itemSubtotal);
+    expectCartTotals(expressCart, 10);
+    expect(Number(expressCart.total)).toBe(Number(expressCart.item_subtotal) + 10);
     await expect(page.locator(".checkout-status")).not.toHaveText("Unable to update the delivery method.");
     await expect(page.locator('[data-summary="shipping_total"]')).toHaveText("10,00 €");
-    await expect(page.locator('[data-summary="total"]')).toHaveText("20,00 €");
+    await expect(page.locator('[data-summary="total"]')).toHaveText(new Intl.NumberFormat("fr-FR", {
+      style: "currency",
+      currency: "EUR",
+    }).format(Number(expressCart.total)));
+
+    const { cart: restoredStandardCart, shippingOptionId: restoredStandardOptionId } = await selectShipping("Standard Shipping");
+    expect(restoredStandardCart.shipping_methods).toHaveLength(1);
+    expect(restoredStandardCart.shipping_methods[0].shipping_option_id).toBe(restoredStandardOptionId);
+    expectCartTotals(restoredStandardCart, 0);
+    expect(Number(restoredStandardCart.total)).toBe(Number(restoredStandardCart.item_subtotal));
   } finally {
     // Nettoyage systématique des données du compte de test.
     await Promise.all([
       db.collection("users").doc(email).delete(),
-      db.collection("saved").doc(email).delete(),
       db.collection("sellers").doc(email).delete()
     ]);
   }

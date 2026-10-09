@@ -1,6 +1,6 @@
 const { test, expect } = require("@playwright/test");
 
-test("F-14 - l'accueil charge les quatre produits Medusa sans fallback Firestore", async ({ page }) => {
+test("F-14 - l'accueil charge le catalogue Medusa sans fallback Firestore", async ({ page }) => {
   const firestoreHomeRequests = [];
 
   page.on("request", (request) => {
@@ -24,15 +24,21 @@ test("F-14 - l'accueil charge les quatre produits Medusa sans fallback Firestore
 
   const products = await proxyResponse.json();
   expect(Array.isArray(products)).toBe(true);
-  expect(products).toHaveLength(4);
+  expect(products.length).toBeGreaterThan(6);
+  expect(products.length).toBeLessThanOrEqual(100);
 
   const catalogue = page.locator("#men-tshirt-products");
   const cards = catalogue.locator(".product-card");
 
   await expect(catalogue.locator(".product-category")).toHaveText("Catalogue");
-  await expect(cards).toHaveCount(4);
+  await expect(cards).toHaveCount(products.length);
   await expect(cards.first().locator(".product-brand")).not.toHaveText("");
+  await expect(cards.first().locator(".product-short-des")).toHaveText(products[0].category);
+  await expect(cards.first().locator(".product-brand")).toHaveText(products[0].brand);
   await expect(cards.first().locator(".product-thumb")).toBeVisible();
+  await expect(cards.first().locator(".product-thumb")).toHaveAttribute("loading", "eager");
+  await expect(cards.nth(6).locator(".product-thumb")).toHaveAttribute("loading", "lazy");
+  await expect(catalogue.locator(".pre-btn")).toBeDisabled();
 
   for (const card of await cards.all()) {
     const price = card.locator(".price");

@@ -35,6 +35,9 @@ module.exports = defineConfig({
   },
   modules: [
     {
+      resolve: "./src/modules/wishlist",
+    },
+    {
       resolve: "./src/modules/managed-media",
     },
     {

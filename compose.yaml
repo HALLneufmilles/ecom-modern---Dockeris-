@@ -61,6 +61,7 @@ services:
       MEDUSA_PUBLISHABLE_API_KEY: ${MEDUSA_PUBLISHABLE_API_KEY:-}
       STRIPE_PUBLISHABLE_KEY: ${STRIPE_PUBLISHABLE_KEY:-}
       STOREFRONT_URL: ${STOREFRONT_URL:-http://127.0.0.1:5000}
+      MVDW_FEATURE_WISHLIST: ${MVDW_FEATURE_WISHLIST:-true}
     ports:
       - 5000:5000
     env_file:
@@ -78,6 +79,7 @@ services:
     environment:
       NODE_ENV: production
       STOREFRONT_URL: ${STOREFRONT_URL:-http://127.0.0.1:5001}
+      MVDW_FEATURE_WISHLIST: ${MVDW_FEATURE_WISHLIST:-true}
     ports:
       - 5001:5000
     env_file:
@@ -118,6 +120,7 @@ services:
       DATABASE_URL: "postgresql://medusa:${POSTGRES_PASSWORD}@postgres:5432/medusa"
       STRIPE_API_KEY: ${stripe_key}
       STRIPE_WEBHOOK_SECRET: ${STRIPE_WEBHOOK_SECRET:-}
+      MVDW_FEATURE_WISHLIST: ${MVDW_FEATURE_WISHLIST:-true}
     depends_on:
       postgres:
         condition: service_healthy
