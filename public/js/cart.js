@@ -394,6 +394,14 @@ const loadWishlist = async () => {
   }
 };
 
+// `loadWishlist` is intentionally not called for an anonymous visitor. Hide the
+// static Cart section here as well so an OFF feature is never exposed in that
+// case.
+if (window.storefrontConfig?.features?.wishlist !== true) {
+  const wishlistSection = document.querySelector(".wishlist-section");
+  if (wishlistSection) wishlistSection.hidden = true;
+}
+
 const customerSessionReady = window.customerSessionReady || Promise.resolve({ status: "anonymous" });
 window.medusaCartReady = customerSessionReady.then(() => loadMedusaCart());
 window.medusaWishlistReady = customerSessionReady.then((session) => {

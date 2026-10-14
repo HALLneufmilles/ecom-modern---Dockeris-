@@ -856,8 +856,57 @@ test("F-17 - selected_options persiste, isole les lignes et protège les Custome
 test("F-17 - wishlist désactivée", async ({ page }) => {
   test.skip(process.env.MVDW_FEATURE_WISHLIST !== "false", "Exécuter ce scénario avec MVDW_FEATURE_WISHLIST=false.");
 
+  const cart = {
+    id: "cart_wishlist_feature_off",
+    currency_code: "eur",
+    item_subtotal: 20,
+    items: [{
+      id: "line_wishlist_feature_off",
+      product_id: "prod_wishlist_feature_off",
+      variant_id: "variant_wishlist_feature_off",
+      product_title: "Produit sans Wishlist",
+      variant_title: "Unique",
+      quantity: 1,
+      unit_price: 20,
+      total: 20,
+    }],
+  };
+  const product = {
+    id: "prod_wishlist_feature_off",
+    source: "medusa",
+    name: "Produit sans Wishlist",
+    shortDes: "Description de test",
+    des: "Produit utilisé pour vérifier la désactivation de Wishlist.",
+    images: [],
+    mediaByColor: {},
+    tags: [],
+    options: [],
+    variants: [{
+      id: "variant_wishlist_feature_off",
+      available: true,
+      price: { amount: 20, originalAmount: 20, currencyCode: "eur" },
+      options: [],
+    }],
+  };
+  let wishlistRequests = 0;
+
+  await mockAuthenticatedCustomerSession(page);
+  await page.route("**/medusa-cart/current", (route) => route.fulfill({ json: { cart } }));
+  await page.route("**/medusa-wishlist", (route) => {
+    wishlistRequests += 1;
+    return route.fulfill({ status: 500, json: { error: "wishlist_should_not_be_requested" } });
+  });
   await page.goto("/cart");
+  await expect.poll(() => page.evaluate(() => window.storefrontConfig?.features?.wishlist)).toBe(false);
+  await expect(page.locator(`.cart .sm-product[data-line-id="${cart.items[0].id}"]`)).toBeVisible();
   await expect(page.locator(".wishlist-section")).toBeHidden();
+  await expect(page.locator(".cart-wishlist-move-btn")).toHaveCount(0);
+  expect(wishlistRequests).toBe(0);
+
+  await page.route(`**/medusa-products/${product.id}`, (route) => route.fulfill({ json: product }));
+  await page.route(`**/medusa-products/${product.id}/recommendations`, (route) => route.fulfill({ json: [] }));
+  await page.goto(`/products/${product.id}`);
+  await expect(page.locator(".wishlist-btn")).toBeHidden();
 
   const response = await page.request.get("/medusa-wishlist");
   expect(response.status()).toBe(404);
