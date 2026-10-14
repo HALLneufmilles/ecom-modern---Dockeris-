@@ -29,7 +29,7 @@ const prepareReturnPage = async (page) => {
       seller: false,
     }));
     sessionStorage.setItem("checkout_return_test_initialized", "true");
-    localStorage.setItem("medusa_cart_id", cartId);
+    sessionStorage.setItem("medusa_cart_id", cartId);
   }, { cartId });
 };
 
@@ -61,7 +61,7 @@ for (const paymentMethod of ["card", "link"]) {
     const statusUrl = new URL(statusRequestUrl);
     expect(statusUrl.searchParams.get("session_id")).toBe(sessionId);
     expect(statusUrl.searchParams.get("cart_id")).toBe(cartId);
-    expect(await page.evaluate(() => localStorage.getItem("medusa_cart_id"))).toBeNull();
+    expect(await page.evaluate(() => sessionStorage.getItem("medusa_cart_id"))).toBeNull();
 
     await page.reload();
     await expect(page.locator(".order-reference")).toHaveText("Order #42");
@@ -81,7 +81,7 @@ test("F-06 - un retour Stripe non confirmé conserve le Cart", async ({ page }) 
   await expect(page.locator("#checkout-return-status")).toHaveText(
     "Unable to confirm the order yet. Your cart is unchanged."
   );
-  expect(await page.evaluate(() => localStorage.getItem("medusa_cart_id"))).toBe(cartId);
+  expect(await page.evaluate(() => sessionStorage.getItem("medusa_cart_id"))).toBe(cartId);
   await expect(page).toHaveURL(/\/stripe-checkout\/return/);
 });
 
@@ -109,5 +109,5 @@ test("F-06 - le retour Stripe attend une Order déjà finalisée par le webhook"
 
   await expect(page).toHaveURL(/\/order\/order_medusa_test$/);
   expect(statusRequests).toBeGreaterThanOrEqual(2);
-  expect(await page.evaluate(() => localStorage.getItem("medusa_cart_id"))).toBeNull();
+  expect(await page.evaluate(() => sessionStorage.getItem("medusa_cart_id"))).toBeNull();
 });

@@ -249,7 +249,7 @@ const completeCart = async () => {
   const data = await requestCheckout(`/medusa-checkout/${encodeURIComponent(checkoutCart.id)}/complete`, {
     method: "POST",
   });
-  localStorage.removeItem("medusa_cart_id");
+  sessionStorage.removeItem("medusa_cart_id");
   location.assign(`/order/${encodeURIComponent(data.order.id)}`);
 };
 
@@ -303,7 +303,14 @@ const resetCheckoutEntry = async () => {
 };
 
 const initializeCheckout = async () => {
-  if (!sessionStorage.user) {
+  const session = await (window.customerSessionReady || Promise.resolve({ status: "anonymous" }));
+  if (session.status === "unavailable") {
+    setCheckoutStatus("Account service is temporarily unavailable.", true);
+    placeOrderBtn.disabled = true;
+    return;
+  }
+
+  if (session.status !== "authenticated") {
     location.replace("/login");
     return;
   }
@@ -342,7 +349,8 @@ const initializeCheckout = async () => {
 };
 
 window.addEventListener("pageshow", async (event) => {
-  if (!event.persisted || !sessionStorage.user || !checkoutCart?.id || !checkoutCart.items?.length) return;
+  const session = await (window.customerSessionReady || Promise.resolve({ status: "anonymous" }));
+  if (!event.persisted || session.status !== "authenticated" || !checkoutCart?.id || !checkoutCart.items?.length) return;
 
   try {
     await resetCheckoutEntry();

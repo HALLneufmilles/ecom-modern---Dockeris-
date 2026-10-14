@@ -38,7 +38,8 @@ test("F-04 - ouvrir un produit Medusa, choisir sa variante et l'ajouter au panie
   await page.evaluate(() => {
     localStorage.clear();
     sessionStorage.clear();
-    localStorage.setItem("medusa_cart_id", "cart_missing");
+    localStorage.setItem("medusa_cart_id", "cart_legacy_unproven");
+    sessionStorage.setItem("medusa_cart_id", "cart_missing");
   });
   await page.reload();
 
@@ -74,19 +75,21 @@ test("F-04 - ouvrir un produit Medusa, choisir sa variante et l'ajouter au panie
 
   const colorGroup = page.locator(`.product-option-group[data-option-id="${colorOption.id}"]`);
   const sizeGroup = page.locator(`.product-option-group[data-option-id="${sizeOption.id}"]`);
-  const availableVariant = product.variants.find((variant) => variant.available && variant.price);
+  const defaultColorButton = colorGroup.locator(".option-radio-btn.check");
+  await expect(defaultColorButton).toHaveCount(1);
+  const colorValue = await defaultColorButton.getAttribute("data-option-value");
+  const availableVariant = product.variants.find((variant) => (
+    variant.available && variant.price
+      && variant.options.some((option) => option.optionId === colorOption.id && option.value === colorValue)
+  ));
   expect(availableVariant).toBeTruthy();
-  const colorValue = availableVariant.options.find((option) => option.optionId === colorOption.id)?.value;
   const sizeValue = availableVariant.options.find((option) => option.optionId === sizeOption.id)?.value;
   const colorButton = colorGroup.locator(`.option-radio-btn[data-option-value="${colorValue}"]`);
   const sizeButton = sizeGroup.locator(`.option-radio-btn[data-option-value="${sizeValue}"]`);
 
   await expect(page.locator(".option-radio-btn.uncheck")).toHaveCount(0);
 
-  await colorButton.click();
-  await expect(page.locator(".option-radio-btn.uncheck")).toHaveCount(0);
   await expect(colorButton).toHaveClass(/check/);
-
   await sizeButton.click();
   await expect(page.locator(".option-radio-btn.uncheck")).toHaveCount(0);
 
@@ -105,30 +108,42 @@ test("F-04 - ouvrir un produit Medusa, choisir sa variante et l'ajouter au panie
   await expect(colorGroup.locator(".option-radio-btn.uncheck")).toHaveCount(0);
   await expect(sizeGroup.locator(".option-radio-btn.uncheck")).toHaveCount(0);
 
-  await expect(page.locator(".product-stock")).toHaveText("In stock");
+  await expect(page.locator(".product-stock")).toHaveText("En stock");
   await expect(page.locator(".product-price")).not.toHaveText("Price unavailable");
 
-  const cartResponsePromise = page.waitForResponse(
-    (response) => response.url().endsWith("/medusa-cart/items") && response.request().method() === "POST"
-  );
+  const staleCartResponsePromise = page.waitForResponse((response) => (
+    response.url().endsWith("/medusa-cart/items")
+    && response.request().method() === "POST"
+    && response.request().postDataJSON().cartId === "cart_missing"
+  ));
+  const cartResponsePromise = page.waitForResponse((response) => (
+    response.url().endsWith("/medusa-cart/items")
+    && response.request().method() === "POST"
+    && response.request().postDataJSON().cartId === null
+  ));
 
   await cartButton.click();
 
+  const staleCartResponse = await staleCartResponsePromise;
+  expect(staleCartResponse.status()).toBe(404);
+  await expect(staleCartResponse.json()).resolves.toEqual({ error: "cart_not_found" });
   const cartResponse = await cartResponsePromise;
   expect(cartResponse.status()).toBe(200);
 
   const { cart: medusaCart } = await cartResponse.json();
   expect(medusaCart.id).toMatch(/^cart_/);
   expect(medusaCart.items.some((item) => item.variant_id === availableVariant.id)).toBe(true);
-  await expect(cartButton).toHaveText("added");
+  await expect(cartButton).toHaveText("Ajouté");
 
   const storedState = await page.evaluate(() => ({
-    cartId: localStorage.getItem("medusa_cart_id"),
+    cartId: sessionStorage.getItem("medusa_cart_id"),
+    legacyCartId: localStorage.getItem("medusa_cart_id"),
     legacyCart: localStorage.getItem("cart"),
   }));
 
   expect(storedState.cartId).toBe(medusaCart.id);
   expect(storedState.cartId).not.toBe("cart_missing");
+  expect(storedState.legacyCartId).toBeNull();
   expect(storedState.legacyCart).toBeNull();
 
   await page.reload();
@@ -290,6 +305,51 @@ test("F-04 - une couleur indisponible conserve son clic, sa galerie et bloque se
   await expect(page.locator(".cart-btn")).toBeEnabled();
   await page.locator(".cart-btn").click();
   expect(cartRequests).toHaveLength(0);
+});
+
+test("F-04 - une tentative au-delà du stock affiché sur la fiche produit reste refusée et signalée", async ({ page }) => {
+  const product = {
+    source: "medusa",
+    id: "prod_inventory_limit",
+    name: "Limited Coach Jacket",
+    shortDes: "",
+    des: "",
+    images: [],
+    options: [
+      { id: "color", title: "Couleur", values: ["Bleu océan"] },
+      { id: "size", title: "Taille", values: ["L"] },
+    ],
+    variants: [{
+      id: "variant_inventory_limit",
+      options: [{ optionId: "color", value: "Bleu océan" }, { optionId: "size", value: "L" }],
+      available: true,
+      price: { amount: 89, originalAmount: 89, currencyCode: "eur" },
+    }],
+    tags: [],
+  };
+  let cartPosts = 0;
+
+  await page.addInitScript(() => sessionStorage.setItem("medusa_cart_id", "cart_at_inventory_limit"));
+  await page.route("**/medusa-products/prod_inventory_limit", (route) => route.fulfill({ json: product }));
+  await page.route("**/medusa-products/prod_inventory_limit/recommendations", (route) => route.fulfill({ json: [] }));
+  await page.route("**/medusa-cart/items", (route) => {
+    cartPosts += 1;
+    expect(route.request().postDataJSON()).toEqual({
+      cartId: "cart_at_inventory_limit",
+      variantId: "variant_inventory_limit",
+      quantity: 1,
+    });
+    return route.fulfill({ status: 409, json: { error: "insufficient_inventory" } });
+  });
+
+  await page.goto("/products/prod_inventory_limit");
+  await page.locator('.size-radio-btn[data-option-value="L"]').click();
+  await page.locator(".cart-btn").click();
+
+  expect(cartPosts).toBe(1);
+  await expect(page.locator(".product-state")).toHaveText("Quantité maximale en stock atteinte.");
+  await expect(page.locator(".product-state")).toHaveCSS("color", "rgb(247, 101, 72)");
+  await expect(page.locator(".cart-btn")).toBeEnabled();
 });
 
 test("F-04 - un produit sans Couleur conserve sa galerie générale", async ({ page }) => {

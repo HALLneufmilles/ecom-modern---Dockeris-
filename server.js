@@ -3,6 +3,8 @@ const express = require("express");
 const admin = require("firebase-admin");
 const bcrypt = require("bcrypt");
 const path = require("path");
+const { GUEST_CART_COOKIE, signGuestCart, verifyGuestCart, getGuestCartId } = require("./guest-cart-proof");
+const { resolveCartCustomerAuth } = require("./cart-customer-auth");
 const dotenv = require("dotenv");
 const { storefrontConfig, isStorefrontFeatureEnabled } = require("./public/js/storefront-features");
 const { selectCategoryRecommendations } = require("./recommendations");
@@ -139,7 +141,7 @@ app.get("/storefront-config.js", (req, res) => {
   return res.send(`window.storefrontRuntimeConfig = Object.freeze({ features: Object.freeze({ wishlist: ${isWishlistFeatureEnabled()} }) });`);
 });
 
-const fetchMedusaStore = async (pathname, { method = "GET", body, token, timeout = 5000 } = {}) => {
+const fetchMedusaStore = async (pathname, { method = "GET", body, token, guestProof, timeout = 5000 } = {}) => {
   const { backendUrl, publishableApiKey } = getMedusaStoreConfig();
   const url = new URL(pathname, backendUrl);
   const response = await fetch(url, {
@@ -148,6 +150,7 @@ const fetchMedusaStore = async (pathname, { method = "GET", body, token, timeout
       "x-publishable-api-key": publishableApiKey,
       ...(body ? { "Content-Type": "application/json" } : {}),
       ...(token ? { Authorization: `Bearer ${token}` } : {}),
+      ...(guestProof ? { Cookie: `${GUEST_CART_COOKIE}=${guestProof}` } : {}),
     },
     body: body ? JSON.stringify(body) : undefined,
     signal: AbortSignal.timeout(timeout),
@@ -446,7 +449,7 @@ app.get("/medusa-products/:id", async (req, res) => {
 });
 
 const createMedusaCart = async (regionId, token) => {
-  const data = await fetchMedusaStore("/store/carts", {
+  const data = await fetchMedusaStore("/store/carts?fields=+customer_id", {
     method: "POST",
     body: { region_id: regionId },
     token,
@@ -464,10 +467,29 @@ const readCookie = (req, name) => {
     .map((value) => value.trim())
     .find((value) => value.startsWith(prefix));
 
-  return cookie ? decodeURIComponent(cookie.slice(prefix.length)) : null;
+  if (!cookie) return null;
+  try {
+    return decodeURIComponent(cookie.slice(prefix.length));
+  } catch {
+    return null;
+  }
 };
 
 const getMedusaCustomerToken = (req) => readCookie(req, MEDUSA_AUTH_COOKIE);
+const getGuestCartProof = (req) => readCookie(req, GUEST_CART_COOKIE);
+
+const guestCartCookieOptions = () => {
+  const secure = process.env.NODE_ENV === "production" ? "; Secure" : "";
+  return `HttpOnly; SameSite=Lax; Path=/${secure}`;
+};
+
+const setGuestCartCookie = (res, proof) => {
+  res.append("Set-Cookie", `${GUEST_CART_COOKIE}=${proof}; ${guestCartCookieOptions()}`);
+};
+
+const clearGuestCartCookie = (res) => {
+  res.append("Set-Cookie", `${GUEST_CART_COOKIE}=; ${guestCartCookieOptions()}; Max-Age=0`);
+};
 
 const setMedusaCustomerCookie = (res, token) => {
   const secure = process.env.NODE_ENV === "production" ? "; Secure" : "";
@@ -485,8 +507,10 @@ const clearMedusaCustomerCookie = (res) => {
   );
 };
 
-const retrieveMedusaCart = async (cartId, token) => {
-  const data = await fetchMedusaStore(`/store/carts/${encodeURIComponent(cartId)}?fields=+items.total`, { token });
+const retrieveMedusaCart = async (cartId, token, guestProof) => {
+  const data = await fetchMedusaStore(`/store/carts/${encodeURIComponent(cartId)}?fields=+items.total,+customer_id,+completed_at`, {
+    token, guestProof,
+  });
   return data.cart;
 };
 
@@ -504,10 +528,11 @@ const retrieveMedusaCustomer = async (token) => {
   return data.customer;
 };
 
-const transferMedusaCart = async (cartId, token) => {
+const transferMedusaCart = async (cartId, token, guestProof) => {
   const data = await fetchMedusaStore(`/store/carts/${encodeURIComponent(cartId)}/customer`, {
     method: "POST",
     token,
+    guestProof,
   });
   return data.cart;
 };
@@ -528,50 +553,124 @@ const findUsableMedusaCart = async (cartId, token) => {
   }
 };
 
-const mergeMedusaCarts = async (targetCart, sourceCart, token) => {
-  let cart = targetCart;
-
-  for (const item of sourceCart.items || []) {
-    cart = await addMedusaCartItem(cart.id, item.variant_id, Number(item.quantity), token);
-  }
-
-  return cart;
-};
-
-const resolveCustomerCart = async (token, browserCartId) => {
+const restoreCustomerCart = async (token) => {
   const customer = await retrieveMedusaCustomer(token);
-  const customerCartId = typeof customer.metadata?.active_cart_id === "string"
-    ? customer.metadata.active_cart_id
-    : null;
-  let customerCart = await findUsableMedusaCart(customerCartId, token);
-  const browserCart = browserCartId === customerCartId
-    ? customerCart
-    : await findUsableMedusaCart(browserCartId, token);
-
-  if (customerCart && browserCart) {
-    customerCart = await mergeMedusaCarts(customerCart, browserCart, token);
-  } else if (!customerCart && browserCart) {
-    customerCart = browserCart;
-  } else if (!customerCart) {
-    customerCart = await createMedusaCart(await getDefaultMedusaRegionId(), token);
+  try {
+    const customerCartId = typeof customer.metadata?.active_cart_id === "string"
+      ? customer.metadata.active_cart_id
+      : null;
+    let cart = await findUsableMedusaCart(customerCartId, token);
+    if (cart?.customer_id !== customer.id) cart = null;
+    if (!cart) cart = await createMedusaCart(await getDefaultMedusaRegionId(), token);
+    await updateMedusaCustomer(token, {
+      metadata: { ...customer.metadata, active_cart_id: cart.id },
+    });
+    return { customer, cart };
+  } catch (error) {
+    console.error("Customer authenticated, but cart restoration failed:", error.message);
+    return { customer, cart: null };
   }
-
-  customerCart = await transferMedusaCart(customerCart.id, token);
-  await updateMedusaCustomer(token, {
-    metadata: {
-      ...customer.metadata,
-      active_cart_id: customerCart.id,
-    },
-  });
-
-  return { customer, cart: customerCart };
 };
 
-const addMedusaCartItem = async (cartId, variantId, quantity, token) => {
+const resolveSignupCart = async (token, guestProof) => {
+  const customer = await retrieveMedusaCustomer(token);
+  let cart = null;
+  const guestCartId = getGuestCartId(guestProof);
+  if (guestCartId) {
+    try {
+      const candidate = await retrieveMedusaCart(guestCartId, token, guestProof);
+      if (!candidate.customer_id && !candidate.completed_at) {
+        cart = await transferMedusaCart(candidate.id, token, guestProof);
+      }
+    } catch (error) {
+      console.error("Guest cart could not be attached during signup:", error.message);
+    }
+  }
+  if (!cart) cart = await createMedusaCart(await getDefaultMedusaRegionId(), token);
+  await updateMedusaCustomer(token, {
+    metadata: { ...customer.metadata, active_cart_id: cart.id },
+  });
+  return { customer, cart };
+};
+
+const resolveCartCustomer = (req, res) => resolveCartCustomerAuth(req, res, {
+  getToken: getMedusaCustomerToken,
+  retrieveCustomer: retrieveMedusaCustomer,
+  clearCookie: clearMedusaCustomerCookie,
+});
+
+app.get("/medusa-customer/session", async (req, res) => {
+  try {
+    const { token, customer } = await resolveCartCustomer(req, res);
+    if (!token || !customer) {
+      return res.json({ authenticated: false });
+    }
+
+    return res.json({
+      authenticated: true,
+      user: {
+        name: [customer.first_name, customer.last_name].filter(Boolean).join(" ") || customer.email,
+        email: customer.email,
+      },
+    });
+  } catch (error) {
+    console.error("Medusa customer session restoration failed:", error.message);
+    return res.status(503).json({ error: "customer_session_unavailable" });
+  }
+});
+
+const requireCartAccess = async (req, res, cartId) => {
+  const { token, customer } = await resolveCartCustomer(req, res);
+  const guestProof = getGuestCartProof(req);
+  const cart = await retrieveMedusaCart(cartId, token, token ? null : guestProof);
+  if (cart.completed_at) {
+    const error = new Error("cart_not_found");
+    error.status = 404;
+    throw error;
+  }
+
+  if (cart.customer_id) {
+    if (customer?.id === cart.customer_id) return { cart, token };
+  } else if (!token && verifyGuestCart(guestProof, cartId)) {
+    return { cart, token: null, guestProof };
+  }
+
+  const error = new Error("cart_not_found");
+  error.status = 404;
+  throw error;
+};
+
+const resolveCurrentCart = async (req, res) => {
+  const { token, customer } = await resolveCartCustomer(req, res);
+  if (token) {
+    const cartId = customer.metadata?.active_cart_id;
+    if (typeof cartId !== "string" || !cartId) return null;
+    try {
+      const { cart } = await requireCartAccess(req, res, cartId);
+      return cart.customer_id === customer.id ? cart : null;
+    } catch (error) {
+      if (error.status === 404) return null;
+      throw error;
+    }
+  }
+
+  const cartId = getGuestCartId(getGuestCartProof(req));
+  if (!cartId) return null;
+  try {
+    const { cart } = await requireCartAccess(req, res, cartId);
+    return cart.customer_id ? null : cart;
+  } catch (error) {
+    if (error.status === 404) return null;
+    throw error;
+  }
+};
+
+const addMedusaCartItem = async (cartId, variantId, quantity, token, guestProof) => {
   const data = await fetchMedusaStore(`/store/carts/${encodeURIComponent(cartId)}/line-items`, {
     method: "POST",
     body: { variant_id: variantId, quantity },
     token,
+    guestProof,
   });
 
   return data.cart;
@@ -601,7 +700,44 @@ const sendWishlistError = (res, error) => {
     return res.status(404).json({ error: "wishlist_not_found" });
   }
 
+  if (error.status === 400) {
+    return res.status(400).json({ error: "invalid_wishlist_item" });
+  }
+
   return res.status(502).json({ error: "wishlist_unavailable" });
+};
+
+const isWishlistSelectedOptions = (value) => (
+  value
+  && typeof value === "object"
+  && !Array.isArray(value)
+  && Object.keys(value).length > 0
+  && Object.values(value).every((optionValue) => typeof optionValue === "string" && optionValue)
+);
+
+const resolveWishlistImage = (product, item) => {
+  const colorOption = product.options.find((option) => ["color", "couleur"].includes(option.title.toLowerCase()));
+  let colorValue = null;
+
+  if (colorOption && item.variant_id) {
+    const variant = product.variants.find((candidate) => candidate.id === item.variant_id);
+    colorValue = variant?.options.find((option) => option.optionId === colorOption.id)?.value || null;
+  }
+  if (colorOption && !colorValue && isWishlistSelectedOptions(item.selected_options)) {
+    colorValue = item.selected_options[colorOption.id] || null;
+  }
+
+  const colorImage = colorValue
+    ? product.mediaByColor?.[colorValue]?.find((image) => image?.url)?.url
+    : null;
+  if (colorImage) return colorImage;
+
+  if (item.variant_id) {
+    const variant = product.variants.find((candidate) => candidate.id === item.variant_id);
+    if (variant?.images?.[0]) return variant.images[0];
+  }
+
+  return product.images[0] || null;
 };
 
 const retrieveWishlistCatalogueProduct = async (productId, regionId) => {
@@ -620,8 +756,54 @@ const retrieveWishlistCatalogueProduct = async (productId, regionId) => {
     name: product.name,
     shortDes: product.shortDes,
     image: product.images[0] || null,
+    images: product.images,
+    mediaByColor: product.mediaByColor,
     price: priceVariant?.price || null,
+    options: product.options,
+    variants: product.variants.map((variant) => ({
+      id: variant.id,
+      available: variant.available,
+      price: variant.price,
+      options: variant.options,
+      images: variant.images,
+    })),
   };
+};
+
+const mapWishlistItemContext = (item) => ({
+  id: item.id,
+  productId: item.product_id,
+  variantId: item.variant_id || null,
+  selectedOptions: isWishlistSelectedOptions(item.selected_options) ? item.selected_options : null,
+});
+
+const getCustomerWishlistItemForCart = async (token, wishlistItemId, variantId) => {
+  const data = await fetchMedusaStore("/store/customers/me/wishlist", { token });
+  const item = data.wishlist?.items?.find((wishlistItem) => wishlistItem.id === wishlistItemId);
+  if (!item) {
+    const error = new Error("wishlist_item_not_found");
+    error.status = 404;
+    error.code = "wishlist_item_not_found";
+    throw error;
+  }
+
+  const product = await retrieveWishlistCatalogueProduct(item.product_id, await getDefaultMedusaRegionId());
+  if (!product.variants?.some((variant) => variant.id === variantId)) {
+    const error = new Error("wishlist_item_product_mismatch");
+    error.status = 400;
+    error.code = "wishlist_item_product_mismatch";
+    throw error;
+  }
+
+  return item;
+};
+
+const removeCustomerWishlistItemAfterCart = async (token, wishlistItemId) => {
+  await fetchMedusaStore(`/store/customers/me/wishlist/items/${encodeURIComponent(wishlistItemId)}`, {
+    method: "DELETE",
+    token,
+  });
+  return true;
 };
 
 app.get("/medusa-wishlist", async (req, res) => {
@@ -639,9 +821,11 @@ app.get("/medusa-wishlist", async (req, res) => {
     const regionId = await getDefaultMedusaRegionId();
     const items = (await Promise.all((wishlist.items || []).map(async (item) => {
       try {
+        const product = await retrieveWishlistCatalogueProduct(item.product_id, regionId);
         return {
-          id: item.id,
-          product: await retrieveWishlistCatalogueProduct(item.product_id, regionId),
+          ...mapWishlistItemContext(item),
+          image: resolveWishlistImage(product, item),
+          product,
         };
       } catch (error) {
         if (error.status === 404) return null;
@@ -655,18 +839,37 @@ app.get("/medusa-wishlist", async (req, res) => {
   }
 });
 
+app.get("/medusa-wishlist/items/:itemId", async (req, res) => {
+  const token = requireWishlistToken(req, res);
+  if (!token) return;
+
+  try {
+    const data = await fetchMedusaStore(`/store/customers/me/wishlist/items/${encodeURIComponent(req.params.itemId)}`, { token });
+    return res.json({ wishlistItem: mapWishlistItemContext(data.wishlist_item) });
+  } catch (error) {
+    return sendWishlistError(res, error);
+  }
+});
+
 app.post("/medusa-wishlist/items", async (req, res) => {
   const token = requireWishlistToken(req, res);
   if (!token) return;
 
-  if (typeof req.body.productId !== "string" || !req.body.productId) {
+  const { productId, variantId, selectedOptions } = req.body;
+  if (typeof productId !== "string" || !productId
+    || (variantId !== undefined && (typeof variantId !== "string" || !variantId))
+    || (selectedOptions !== undefined && !isWishlistSelectedOptions(selectedOptions))
+    || (variantId && selectedOptions)) {
     return res.status(400).json({ error: "invalid_wishlist_item" });
   }
 
   try {
+    const body = { product_id: productId };
+    if (variantId) body.variant_id = variantId;
+    if (selectedOptions) body.selected_options = selectedOptions;
     const data = await fetchMedusaStore("/store/customers/me/wishlist/items", {
       method: "POST",
-      body: { product_id: req.body.productId },
+      body,
       token,
     });
     return res.status(201).json({ wishlistItem: data.wishlist_item });
@@ -690,55 +893,127 @@ app.delete("/medusa-wishlist/items/:itemId", async (req, res) => {
   }
 });
 
+app.put("/medusa-wishlist/items/:itemId", async (req, res) => {
+  const token = requireWishlistToken(req, res);
+  if (!token) return;
+
+  const { productId, variantId, selectedOptions } = req.body;
+  if (typeof productId !== "string" || !productId
+    || (variantId !== undefined && (typeof variantId !== "string" || !variantId))
+    || (selectedOptions !== undefined && !isWishlistSelectedOptions(selectedOptions))
+    || (variantId && selectedOptions)) {
+    return res.status(400).json({ error: "invalid_wishlist_item" });
+  }
+
+  try {
+    const data = await fetchMedusaStore(`/store/customers/me/wishlist/items/${encodeURIComponent(req.params.itemId)}`, {
+      method: "PUT",
+      body: {
+        product_id: productId,
+        ...(variantId ? { variant_id: variantId } : {}),
+        ...(selectedOptions ? { selected_options: selectedOptions } : {}),
+      },
+      token,
+    });
+    return res.json({ wishlistItem: data.wishlist_item });
+  } catch (error) {
+    return sendWishlistError(res, error);
+  }
+});
+
 app.post("/medusa-cart/items", async (req, res) => {
   const { publishableApiKey } = getMedusaStoreConfig();
-  const { cartId, variantId, quantity = 1 } = req.body;
-  const token = getMedusaCustomerToken(req);
+  const { cartId, variantId, quantity = 1, wishlistItemId } = req.body;
 
   if (!publishableApiKey) {
     return res.status(503).json({ error: "cart_unavailable" });
   }
 
-  if (typeof variantId !== "string" || !Number.isInteger(quantity) || quantity < 1) {
+  if (typeof variantId !== "string" || !Number.isInteger(quantity) || quantity < 1
+    || (wishlistItemId !== undefined && (typeof wishlistItemId !== "string" || !wishlistItemId))) {
     return res.status(400).json({ error: "invalid_cart_item" });
   }
 
   try {
-    let activeCartId = typeof cartId === "string" && cartId ? cartId : null;
-
-    if (!activeCartId) {
-      activeCartId = (await createMedusaCart(await getDefaultMedusaRegionId(), token)).id;
+    const { token } = await resolveCartCustomer(req, res);
+    let wishlistItem;
+    if (wishlistItemId) {
+      if (!token) return res.status(401).json({ error: "authentication_required" });
+      if (!isWishlistFeatureEnabled()) return res.status(404).json({ error: "wishlist_disabled" });
+      wishlistItem = await getCustomerWishlistItemForCart(token, wishlistItemId, variantId);
     }
 
-    let cart;
-    try {
-      cart = await addMedusaCartItem(activeCartId, variantId, quantity, token);
-    } catch (error) {
-      if (!cartId || error.status !== 404) {
+    let activeCartId = typeof cartId === "string" && cartId ? cartId : null;
+    let guestProof;
+
+    const currentCart = await resolveCurrentCart(req, res);
+    if (currentCart) {
+      activeCartId = currentCart.id;
+      if (!token) guestProof = getGuestCartProof(req);
+    } else if (!token) {
+      if (activeCartId) {
+        const error = new Error("cart_not_found");
+        error.status = 404;
         throw error;
       }
-
-      activeCartId = (await createMedusaCart(await getDefaultMedusaRegionId(), token)).id;
-      cart = await addMedusaCartItem(activeCartId, variantId, quantity, token);
+    } else if (activeCartId) {
+      ({ guestProof } = await requireCartAccess(req, res, activeCartId));
     }
 
-    if (token) {
+    if (!activeCartId) {
+      const newCart = await createMedusaCart(await getDefaultMedusaRegionId(), token);
+      activeCartId = newCart.id;
+      if (!newCart.customer_id) guestProof = signGuestCart(activeCartId);
+    }
+
+    let cart = await addMedusaCartItem(activeCartId, variantId, quantity, token, guestProof);
+    cart = await retrieveMedusaCart(cart.id, token, guestProof);
+
+    if (token && cart.customer_id) {
       const customer = await retrieveMedusaCustomer(token);
       await updateMedusaCustomer(token, {
         metadata: { ...customer.metadata, active_cart_id: cart.id },
       });
     }
 
-    return res.json({ cart });
+    if (guestProof && !cart.customer_id) setGuestCartCookie(res, guestProof);
+
+    let wishlistRemoved = false;
+    if (wishlistItem) {
+      try {
+        wishlistRemoved = await removeCustomerWishlistItemAfterCart(token, wishlistItem.id);
+      } catch (error) {
+        console.error("F-17 Wishlist removal after cart add failed:", error.message);
+      }
+    }
+
+    return res.json({ cart, wishlistRemoved });
   } catch (error) {
     console.error("F-04 Medusa cart unavailable:", error.message);
-    return res.status(502).json({ error: "cart_unavailable" });
+    if (error.status === 400 && /does not have the required inventory/i.test(error.message)) {
+      return res.status(409).json({ error: "insufficient_inventory" });
+    }
+    if (error.code === "wishlist_item_not_found") {
+      return res.status(404).json({ error: "wishlist_item_not_found" });
+    }
+    if (error.code === "wishlist_item_product_mismatch") {
+      return res.status(400).json({ error: "wishlist_item_product_mismatch" });
+    }
+    return res.status(error.status === 404 ? 404 : 502).json({ error: error.status === 404 ? "cart_not_found" : "cart_unavailable" });
+  }
+});
+
+app.get("/medusa-cart/current", async (req, res) => {
+  try {
+    return res.json({ cart: await resolveCurrentCart(req, res) });
+  } catch (error) {
+    return res.status(error.status === 401 ? 401 : 502).json({ error: "cart_unavailable" });
   }
 });
 
 app.get("/medusa-cart/:id", async (req, res) => {
   try {
-    const cart = await retrieveMedusaCart(req.params.id, getMedusaCustomerToken(req));
+    const { cart } = await requireCartAccess(req, res, req.params.id);
     return res.json({ cart });
   } catch (error) {
     const status = error.status === 404 ? 404 : 502;
@@ -754,29 +1029,39 @@ app.patch("/medusa-cart/:cartId/items/:lineId", async (req, res) => {
   }
 
   try {
+    const { token, guestProof } = await requireCartAccess(req, res, req.params.cartId);
     const data = await fetchMedusaStore(
       `/store/carts/${encodeURIComponent(req.params.cartId)}/line-items/${encodeURIComponent(req.params.lineId)}?fields=+items.total`,
       {
         method: "POST",
         body: { quantity },
-        token: getMedusaCustomerToken(req),
+        token,
+        guestProof,
       }
     );
     return res.json({ cart: data.cart });
   } catch (error) {
-    return res.status(error.status === 404 ? 404 : 502).json({ error: "cart_update_failed" });
+    if (error.status === 400 && /does not have the required inventory/i.test(error.message)) {
+      return res.status(409).json({ error: "insufficient_inventory" });
+    }
+    return res.status(error.status === 404 ? 404 : 502).json({
+      error: error.status === 404 ? "cart_not_found" : "cart_update_failed",
+    });
   }
 });
 
 app.delete("/medusa-cart/:cartId/items/:lineId", async (req, res) => {
   try {
+    const { token, guestProof } = await requireCartAccess(req, res, req.params.cartId);
     const data = await fetchMedusaStore(
       `/store/carts/${encodeURIComponent(req.params.cartId)}/line-items/${encodeURIComponent(req.params.lineId)}?fields=+items.total`,
-      { method: "DELETE", token: getMedusaCustomerToken(req) }
+      { method: "DELETE", token, guestProof }
     );
     return res.json({ cart: data.parent });
   } catch (error) {
-    return res.status(error.status === 404 ? 404 : 502).json({ error: "cart_delete_failed" });
+    return res.status(error.status === 404 ? 404 : 502).json({
+      error: error.status === 404 ? "cart_not_found" : "cart_delete_failed",
+    });
   }
 });
 
@@ -828,7 +1113,7 @@ const customerResponse = ({ customer, cart, legacy }) => ({
   email: customer.email,
   seller: legacy.user.exists ? Boolean(legacy.user.data().seller) : false,
   tagsSeller: legacy.seller.exists ? legacy.seller.data().tagsSeller : null,
-  cartId: cart.id,
+  cartId: cart?.id || null,
 });
 
 app.post("/signup", async (req, res) => {
@@ -867,9 +1152,10 @@ app.post("/signup", async (req, res) => {
       seller: false,
     });
 
-    const { customer, cart } = await resolveCustomerCart(token, req.body.cartId);
+    const { customer, cart } = await resolveSignupCart(token, getGuestCartProof(req));
     const legacy = await getLegacyAccountState(email);
     setMedusaCustomerCookie(res, token);
+    clearGuestCartCookie(res);
     return res.json(customerResponse({ customer, cart, legacy }));
   } catch (error) {
     console.error("Medusa customer registration failed:", error.message);
@@ -950,8 +1236,9 @@ app.post("/login", async (req, res) => {
       });
     }
 
-    const { customer, cart } = await resolveCustomerCart(token, req.body.cartId);
+    const { customer, cart } = await restoreCustomerCart(token);
     setMedusaCustomerCookie(res, token);
+    clearGuestCartCookie(res);
     return res.json(customerResponse({ customer, cart, legacy }));
   } catch (error) {
     console.error("Medusa customer login failed:", error.message);
@@ -961,6 +1248,7 @@ app.post("/login", async (req, res) => {
 
 app.post("/logout", (req, res) => {
   clearMedusaCustomerCookie(res);
+  clearGuestCartCookie(res);
   return res.json({ success: true });
 });
 
@@ -1249,7 +1537,7 @@ const sendCheckoutError = (res, error, fallback = "checkout_unavailable") => {
   const status = [400, 401, 403, 404, 409].includes(error.status) ? error.status : 502;
   const publicErrors = new Set([
     "authentication_required",
-    "cart_forbidden",
+    "cart_not_found",
     "cart_completed",
     "empty_cart",
     "completed_order_not_found",
@@ -1272,8 +1560,8 @@ const requireCheckoutContext = async (req, cartId) => {
   ]);
 
   if (cart.customer_id !== customer.id) {
-    const error = new Error("cart_forbidden");
-    error.status = 403;
+    const error = new Error("cart_not_found");
+    error.status = 404;
     throw error;
   }
   if (cart.completed_at) {
@@ -1726,7 +2014,7 @@ app.post("/medusa-checkout/:cartId/complete", async (req, res) => {
 
     const customer = await retrieveMedusaCustomer(token);
     if (cart.customer_id !== customer.id) {
-      return res.status(403).json({ error: "cart_forbidden" });
+      return res.status(404).json({ error: "cart_not_found" });
     }
     if (cart.completed_at) {
       const existingOrder = await findCustomerOrderByCart(token, cart.id);

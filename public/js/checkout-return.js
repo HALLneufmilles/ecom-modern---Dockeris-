@@ -32,6 +32,7 @@ const waitForOrder = async () => {
       return;
     }
     if (data.status === "complete" && data.order?.id) {
+      sessionStorage.removeItem("medusa_cart_id");
       localStorage.removeItem("medusa_cart_id");
       sessionStorage.setItem(orderPlacedNoticeKey, data.order.id);
       location.replace(`/order/${encodeURIComponent(data.order.id)}`);

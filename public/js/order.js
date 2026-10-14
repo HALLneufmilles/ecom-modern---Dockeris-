@@ -67,7 +67,13 @@ const showOrderPlacedNotice = () => {
 };
 
 const loadOrder = async () => {
-  if (!sessionStorage.user) {
+  const session = await (window.customerSessionReady || Promise.resolve({ status: "anonymous" }));
+  if (session.status === "unavailable") {
+    document.querySelector(".order-status").textContent = "Account service is temporarily unavailable.";
+    return;
+  }
+
+  if (session.status !== "authenticated") {
     location.replace("/login");
     return;
   }

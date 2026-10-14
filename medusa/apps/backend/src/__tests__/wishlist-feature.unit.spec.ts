@@ -1,8 +1,12 @@
 import { GET } from "../api/store/customers/me/wishlist/route"
 import { POST } from "../api/store/customers/me/wishlist/items/route"
-import { DELETE } from "../api/store/customers/me/wishlist/items/[id]/route"
+import { DELETE, GET as GET_ITEM, PUT } from "../api/store/customers/me/wishlist/items/[id]/route"
 import removeProductWishlistItems from "../subscribers/remove-product-wishlist-items"
 import { isWishlistFeatureEnabled } from "../config/wishlist-feature"
+import {
+  normalizeWishlistSelectedOptions,
+  validateWishlistSelectedOptions,
+} from "../workflows/wishlist/validate-wishlist-selection"
 
 const response = () => {
   const res: any = {
@@ -45,7 +49,7 @@ describe("wishlist feature flag", () => {
       params: { id: "witem_test" },
     } as any
 
-    for (const handler of [GET, POST, DELETE]) {
+    for (const handler of [GET, POST, GET_ITEM, PUT, DELETE]) {
       const res = response()
 
       await handler(req, res)
@@ -55,6 +59,26 @@ describe("wishlist feature flag", () => {
     }
 
     expect(scope.resolve).not.toHaveBeenCalled()
+  })
+
+  it("accepts only Product option selections belonging to the Product", async () => {
+    const graph = jest.fn().mockResolvedValue({
+      data: [{
+        options: [{
+          id: "opt_color",
+          values: [{ value: "Noir" }, { value: "Bleu" }],
+        }],
+      }],
+    })
+    const container = { resolve: jest.fn(() => ({ graph })) }
+
+    const selectedOptions = normalizeWishlistSelectedOptions({ opt_color: "Noir" })
+    await expect(validateWishlistSelectedOptions(container, "prod_test", selectedOptions))
+      .resolves.toEqual({ opt_color: "Noir" })
+    await expect(validateWishlistSelectedOptions(container, "prod_test", { opt_color: "Inconnue" }))
+      .rejects.toThrow("Selected option does not belong to product")
+    expect(() => normalizeWishlistSelectedOptions({ opt_unknown: "" }))
+      .toThrow("selected_options must contain option values")
   })
 
   it("does not run the product-deletion subscriber when disabled", async () => {

@@ -113,7 +113,7 @@
 }
 
 .option-radio-btn.uncheck {
-  border: 2px solid red;
+  border: 2px solid #f25c3a;
   box-shadow: 0 0 10px #f25c3a;
 }
 
@@ -138,6 +138,10 @@
   color: #c62828;
 }
 
+.product-state.product-inventory-limit {
+  color: #F76548;
+}
+
 .btn {
   width: 48%;
   padding: 20px;
@@ -155,6 +159,24 @@
   margin-right: 2%;
   background: #383838;
   color: #fff;
+}
+
+.cart-btn:disabled {
+  opacity: 0.5;
+  cursor: pointer;
+}
+
+.cart-btn[data-state="unavailable"]:disabled {
+  cursor: not-allowed;
+}
+
+.cart-btn.cart-btn-disabled:not(:disabled) {
+  opacity: 0.5;
+  cursor: pointer;
+}
+
+.wishlist-btn.wishlist-auth-required {
+  opacity: 0.5;
 }
 
 .detail-des {

@@ -9,6 +9,12 @@ import {
   MANAGED_MEDIA_MODULE,
 } from "../modules/managed-media"
 import type ManagedMediaModuleService from "../modules/managed-media/service"
+import {
+  protectPaymentCollection,
+  protectStoreCartBody,
+  protectStoreCartPath,
+  protectStoreCartQuery,
+} from "./guest-cart-access"
 
 export const MAX_ADMIN_IMAGE_UPLOADS = 10
 export const MAX_ADMIN_IMAGE_SIZE_BYTES = 1024 * 1024
@@ -101,6 +107,30 @@ export const trackAdminImageUploads = (
 
 export default defineMiddlewares({
   routes: [
+    {
+      matcher: "/store/carts/*",
+      middlewares: [protectStoreCartPath],
+    },
+    {
+      matcher: "/store/payment-collections",
+      method: "POST",
+      middlewares: [protectStoreCartBody],
+    },
+    {
+      matcher: "/store/payment-collections/*/payment-sessions",
+      method: "POST",
+      middlewares: [protectPaymentCollection],
+    },
+    {
+      matcher: "/store/shipping-options",
+      method: "GET",
+      middlewares: [protectStoreCartQuery],
+    },
+    {
+      matcher: "/store/shipping-options/*/calculate",
+      method: "POST",
+      middlewares: [protectStoreCartBody],
+    },
     {
       matcher: "/store/customers/me/wishlist*",
       middlewares: [authenticate("customer", ["bearer", "session"])],

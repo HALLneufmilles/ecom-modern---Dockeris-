@@ -43,7 +43,7 @@ test("F-01 / F-02 / F-03 - inscription, déconnexion et reconnexion", async ({ p
         headers: new Headers({ "Content-Type": "application/json" }),
         body: JSON.stringify({ variantId: variant.id, quantity: 1 }),
       }).then((response) => response.json());
-      localStorage.setItem("medusa_cart_id", cart.id);
+      sessionStorage.setItem("medusa_cart_id", cart.id);
       return {
         id: cart.id,
         variantId: variant.id,
@@ -65,6 +65,9 @@ test("F-01 / F-02 / F-03 - inscription, déconnexion et reconnexion", async ({ p
 
     await expect(page.locator("#terms-and-cond")).toBeChecked();
 
+    // Le cookie signé, et non un ancien identifiant d'onglet, désigne le panier invité à rattacher.
+    await page.evaluate(() => sessionStorage.setItem("medusa_cart_id", "cart_stale_signup_tab"));
+
     await page.locator(".submit-btn").click();
 
     // Après inscription, l'application doit revenir sur l'accueil.
@@ -76,7 +79,7 @@ test("F-01 / F-02 / F-03 - inscription, déconnexion et reconnexion", async ({ p
     expect(user).not.toBeNull();
     expect(user.email).toBe(email);
     expect(user.name).toBe("Playwright Test");
-    expect(await page.evaluate(() => localStorage.getItem("medusa_cart_id"))).toBe(initialCart.id);
+    expect(await page.evaluate(() => sessionStorage.getItem("medusa_cart_id"))).toBe(initialCart.id);
     expect(await page.evaluate(() => localStorage.getItem("cart"))).toBeNull();
 
     // ---------------------------------
@@ -121,7 +124,15 @@ test("F-01 / F-02 / F-03 - inscription, déconnexion et reconnexion", async ({ p
     user = await page.evaluate(() => sessionStorage.getItem("user"));
 
     expect(user).toBeNull();
-    expect(await page.evaluate(() => localStorage.getItem("medusa_cart_id"))).toBeNull();
+    expect(await page.evaluate(() => sessionStorage.getItem("medusa_cart_id"))).toBeNull();
+    const anonymousCartResponse = await page.evaluate(async (cartId) => (
+      fetch(`/medusa-cart/${encodeURIComponent(cartId)}`).then((response) => response.status)
+    ), initialCart.id);
+    expect(anonymousCartResponse).toBe(404);
+    const anonymousCurrentCart = await page.evaluate(async () => (
+      fetch("/medusa-cart/current").then((response) => response.json())
+    ));
+    expect(anonymousCurrentCart.cart).toBeNull();
 
     // ---------------------------------
     // F-02 - CONNEXION
@@ -142,7 +153,7 @@ test("F-01 / F-02 / F-03 - inscription, déconnexion et reconnexion", async ({ p
     expect(user.email).toBe(email);
     expect(user.name).toBe("Playwright Test");
 
-    const restoredCartId = await page.evaluate(() => localStorage.getItem("medusa_cart_id"));
+    const restoredCartId = await page.evaluate(() => sessionStorage.getItem("medusa_cart_id"));
     expect(restoredCartId).toBe(initialCart.id);
     const restoredCart = await page.evaluate(async (cartId) => {
       const response = await fetch(`/medusa-cart/${cartId}`);
@@ -150,6 +161,10 @@ test("F-01 / F-02 / F-03 - inscription, déconnexion et reconnexion", async ({ p
     }, restoredCartId);
     expect(restoredCart.items).toHaveLength(1);
     expect(restoredCart.items[0].variant_id).toBe(initialCart.variantId);
+    const currentCustomerCart = await page.evaluate(async () => (
+      fetch("/medusa-cart/current").then((response) => response.json())
+    ));
+    expect(currentCustomerCart.cart.id).toBe(initialCart.id);
     expect(await page.evaluate(() => localStorage.getItem("cart"))).toBeNull();
 
     await page.goto("/checkout");

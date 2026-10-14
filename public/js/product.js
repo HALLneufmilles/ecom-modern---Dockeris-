@@ -9,6 +9,8 @@ const productPageState = {
   product: null,
   selectedOptions: {},
   selectedVariant: null,
+  explicitlySelectedOptionIds: new Set(),
+  wishlistContext: null,
 };
 
 let optionValidationAttempted = false;
@@ -175,28 +177,53 @@ const updateOptionErrorStates = () => {
 const updateSelectedVariant = () => {
   productPageState.selectedVariant = findSelectedVariant();
   const variant = productPageState.selectedVariant;
+  const hasExploitableVariant = productPageState.product.variants.some(
+    (candidate) => candidate.available && candidate.price
+  );
+  const cartBtn = document.querySelector(".cart-btn");
+  const canAddToCart = Boolean(variant?.available && variant.price);
+  const isCartUnavailable = !hasExploitableVariant;
+
+  cartBtn.disabled = isCartUnavailable;
+  cartBtn.classList.toggle("cart-btn-disabled", !canAddToCart);
+  cartBtn.dataset.state = canAddToCart ? "ready" : isCartUnavailable ? "unavailable" : "incomplete";
+  if (isCartUnavailable) {
+    cartBtn.setAttribute("aria-disabled", "true");
+  } else {
+    cartBtn.removeAttribute("aria-disabled");
+  }
 
   if (!variant) {
-    stockState.textContent = Object.keys(productPageState.selectedOptions).length
-      ? "Select all options"
-      : "";
+    stockState.textContent = hasExploitableVariant ? "" : "Rupture de stock";
     return;
   }
 
   renderVariantPrice(variant);
-  stockState.textContent = variant.available ? "In stock" : "Out of stock";
+  stockState.textContent = variant.available ? "En stock" : "Rupture de stock";
 };
 
-const selectOption = (button) => {
+const clearSelectionSuccessStates = () => {
+  const cartBtn = document.querySelector(".cart-btn");
+  const wishlistBtn = document.querySelector(".wishlist-btn");
+
+  if (cartBtn?.textContent === "Ajouté") cartBtn.textContent = "Ajouter au panier";
+  if (wishlistBtn?.textContent === "Ajouté") wishlistBtn.textContent = "Liste de souhaits";
+};
+
+const selectOption = (button, { explicit = true } = {}) => {
   const group = button.closest(".product-option-group");
   const isColorButton = button.classList.contains("color-radio-btn");
+  const selectionChanged = productPageState.selectedOptions[button.dataset.optionId] !== button.dataset.optionValue;
 
   group.querySelectorAll(".option-radio-btn").forEach((item) => {
     item.classList.remove("check", "uncheck");
   });
   button.classList.add("check");
   productPageState.selectedOptions[button.dataset.optionId] = button.dataset.optionValue;
+  if (explicit) productPageState.explicitlySelectedOptionIds.add(button.dataset.optionId);
+  if (selectionChanged) clearSelectionSuccessStates();
   productState.textContent = "";
+  productState.classList.remove("product-inventory-limit");
 
   if (isColorButton) {
     const sizeOption = productPageState.product.options.find(
@@ -209,6 +236,7 @@ const selectOption = (button) => {
 
     if (sizeOption && !hasAvailableSelectedSize) {
       delete productPageState.selectedOptions[sizeOption.id];
+      productPageState.explicitlySelectedOptionIds.delete(sizeOption.id);
       optionsContainer
         .querySelector(`.product-option-group[data-option-id="${sizeOption.id}"]`)
         ?.querySelectorAll(".option-radio-btn")
@@ -267,17 +295,53 @@ const renderOptions = (product) => {
   } else {
     updateOptionAvailability();
 
+    const wishlistVariant = productPageState.wishlistContext?.variantId
+      ? product.variants.find((variant) => variant.id === productPageState.wishlistContext.variantId)
+      : null;
+    if (wishlistVariant) {
+      wishlistVariant.options.forEach((option) => {
+        const button = optionsContainer.querySelector(
+          `.product-option-group[data-option-id="${option.optionId}"] .option-radio-btn[data-option-value="${option.value}"]`
+        );
+        if (button) selectOption(button, { explicit: false });
+      });
+      return;
+    }
+
+    const wishlistSelectedOptions = productPageState.wishlistContext?.selectedOptions;
+    if (wishlistSelectedOptions) {
+      let restoredSelection = false;
+      Object.entries(wishlistSelectedOptions).forEach(([optionId, value]) => {
+        const button = optionsContainer.querySelector(
+          `.product-option-group[data-option-id="${optionId}"] .option-radio-btn[data-option-value="${value}"]`
+        );
+        if (button) {
+          selectOption(button, { explicit: false });
+          restoredSelection = true;
+        }
+      });
+      if (restoredSelection) return;
+    }
+
     const colorOption = product.options.find(
       (option) => ["color", "couleur"].includes(option.title.toLowerCase())
     );
-    const firstColor = colorOption?.values[0];
+    const firstColor = colorOption?.values.find((value) => product.variants.some((variant) => (
+      variant.available
+      && variant.price
+      && variant.options.some((option) => option.optionId === colorOption.id && option.value === value)
+    )));
     if (colorOption && firstColor) {
       const firstColorButton = optionsContainer.querySelector(
         `.product-option-group[data-option-id="${colorOption.id}"] .color-radio-btn[data-option-value="${firstColor}"]`
       );
       if (firstColorButton) {
-        selectOption(firstColorButton);
+        selectOption(firstColorButton, { explicit: false });
+      } else {
+        updateSelectedVariant();
       }
+    } else {
+      updateSelectedVariant();
     }
   }
 };
@@ -306,37 +370,98 @@ const selectedValueFor = (title) => {
 };
 
 const addMedusaVariantToCart = async () => {
-  const response = await fetch("/medusa-cart/items", {
+  const wishlistItemId = productPageState.wishlistContext?.itemId || null;
+  const postItem = (cartId) => fetch("/medusa-cart/items", {
     method: "POST",
     headers: new Headers({ "Content-Type": "application/json" }),
     body: JSON.stringify({
-      cartId: localStorage.getItem("medusa_cart_id"),
+      cartId,
       variantId: productPageState.selectedVariant.id,
       quantity: 1,
+      ...(wishlistItemId ? { wishlistItemId } : {}),
     }),
   });
+  const cartId = sessionStorage.getItem("medusa_cart_id");
+  let response = await postItem(cartId);
+  if (response.status === 404 && cartId) {
+    sessionStorage.removeItem("medusa_cart_id");
+    response = await postItem(null);
+  }
 
   const data = await response.json();
   if (!response.ok || !data.cart) {
-    throw new Error("Cart is unavailable");
+    const error = new Error(data.error || "cart_unavailable");
+    error.code = data.error;
+    throw error;
   }
 
-  localStorage.setItem("medusa_cart_id", data.cart.id);
+  sessionStorage.setItem("medusa_cart_id", data.cart.id);
+  return data;
 };
+
+const getWishlistVariantId = (product) => {
+  if (product.options.length === 0) {
+    const availableVariants = product.variants.filter((variant) => variant.available && variant.price);
+    return availableVariants.length === 1 ? availableVariants[0].id : null;
+  }
+
+  return productPageState.selectedVariant?.id || null;
+};
+
+const getCurrentWishlistSelection = (product) => {
+  const variantId = getWishlistVariantId(product);
+  if (variantId) {
+    return { variantId, selectedOptions: null };
+  }
+
+  const restoredOptionIds = Object.keys(productPageState.wishlistContext?.selectedOptions || {});
+  const trackedOptionIds = new Set([
+    ...restoredOptionIds,
+    ...productPageState.explicitlySelectedOptionIds,
+  ]);
+  const selectedOptions = Object.fromEntries(
+    [...trackedOptionIds]
+      .filter((optionId) => productPageState.selectedOptions[optionId])
+      .map((optionId) => [optionId, productPageState.selectedOptions[optionId]])
+  );
+
+  return {
+    variantId: null,
+    selectedOptions: Object.keys(selectedOptions).length ? selectedOptions : null,
+  };
+};
+
+const sameSelectedOptions = (first, second) => {
+  const firstEntries = Object.entries(first || {}).sort(([firstId], [secondId]) => firstId.localeCompare(secondId));
+  const secondEntries = Object.entries(second || {}).sort(([firstId], [secondId]) => firstId.localeCompare(secondId));
+  return JSON.stringify(firstEntries) === JSON.stringify(secondEntries);
+};
+
+const matchesWishlistContext = (selection, wishlistContext) => (
+  selection.variantId === (wishlistContext.variantId || null)
+  && sameSelectedOptions(selection.selectedOptions, wishlistContext.selectedOptions)
+);
+
+const hasRestoredCustomerSession = () => window.customerSessionState?.status === "authenticated";
 
 const bindProductActions = (product) => {
   const wishlistBtn = document.querySelector(".wishlist-btn");
   const cartBtn = document.querySelector(".cart-btn");
 
-  wishlistBtn.hidden = window.storefrontConfig?.features?.wishlist !== true;
+  const wishlistEnabled = window.storefrontConfig?.features?.wishlist === true;
+  const wishlistAuthenticationRequired = wishlistEnabled && !hasRestoredCustomerSession();
+  wishlistBtn.hidden = !wishlistEnabled;
+  wishlistBtn.classList.toggle("wishlist-auth-required", wishlistAuthenticationRequired);
+  wishlistBtn.setAttribute("aria-disabled", "false");
 
   wishlistBtn.addEventListener("click", async () => {
+    productState.classList.remove("product-inventory-limit");
     if (!window.storefrontConfig?.features?.wishlist) {
       return;
     }
 
-    if (!sessionStorage.getItem("user")) {
-      productState.textContent = "Connectez-vous pour enregistrer ce produit.";
+    if (!hasRestoredCustomerSession()) {
+      productState.textContent = "Connectez-vous pour utiliser la Wishlist.";
       return;
     }
 
@@ -349,10 +474,22 @@ const bindProductActions = (product) => {
     productState.textContent = "";
 
     try {
-      const response = await fetch("/medusa-wishlist/items", {
-        method: "POST",
+      const selection = getCurrentWishlistSelection(product);
+      const body = { productId: product.id };
+      if (selection.variantId) body.variantId = selection.variantId;
+      if (selection.selectedOptions) body.selectedOptions = selection.selectedOptions;
+      const wishlistContext = productPageState.wishlistContext;
+      if (wishlistContext && matchesWishlistContext(selection, wishlistContext)) {
+        productState.textContent = "Produit déjà en Wishlist.";
+        return;
+      }
+
+      const response = await fetch(wishlistContext
+        ? `/medusa-wishlist/items/${encodeURIComponent(wishlistContext.itemId)}`
+        : "/medusa-wishlist/items", {
+        method: wishlistContext ? "PUT" : "POST",
         headers: new Headers({ "Content-Type": "application/json" }),
-        body: JSON.stringify({ productId: product.id }),
+        body: JSON.stringify(body),
       });
       const data = await response.json();
 
@@ -367,7 +504,16 @@ const bindProductActions = (product) => {
         return;
       }
 
-      wishlistBtn.textContent = "added";
+      if (wishlistContext) {
+        productPageState.wishlistContext.variantId = selection.variantId;
+        productPageState.wishlistContext.selectedOptions = selection.selectedOptions;
+        const url = new URL(location.href);
+        url.searchParams.delete("wishlistVariantId");
+        history.replaceState(null, "", url);
+        productState.textContent = "Produit mis à jour.";
+      } else {
+        wishlistBtn.textContent = "Ajouté";
+      }
     } catch (error) {
       productState.textContent = "Unable to add this product to the wishlist.";
     } finally {
@@ -376,7 +522,13 @@ const bindProductActions = (product) => {
   });
 
   cartBtn.addEventListener("click", async () => {
+    productState.classList.remove("product-inventory-limit");
     const variant = productPageState.selectedVariant;
+
+    if (!product.variants.some((candidate) => candidate.available && candidate.price)) {
+      productState.textContent = "Rupture de stock.";
+      return;
+    }
 
     if (!variant) {
       optionValidationAttempted = true;
@@ -385,7 +537,7 @@ const bindProductActions = (product) => {
     }
 
     if (!variant.available) {
-      productState.textContent = "This variant is out of stock.";
+      productState.textContent = "Rupture de stock.";
       return;
     }
 
@@ -397,18 +549,52 @@ const bindProductActions = (product) => {
     cartBtn.disabled = true;
     productState.textContent = "";
     try {
-      await addMedusaVariantToCart();
-      cartBtn.textContent = "added";
+      const cartData = await addMedusaVariantToCart();
+      cartBtn.textContent = "Ajouté";
+      if (productPageState.wishlistContext && !cartData.wishlistRemoved) {
+        productState.textContent = "Product added to cart, but wishlist could not be updated.";
+      }
     } catch (error) {
-      productState.textContent = "Unable to add this product to the cart.";
+      if (error.code === "insufficient_inventory") {
+        productState.textContent = "Quantité maximale en stock atteinte.";
+        productState.classList.add("product-inventory-limit");
+      } else {
+        productState.textContent = "Unable to add this product to the cart.";
+      }
     } finally {
       cartBtn.disabled = false;
     }
   });
 };
 
-const setData = (product) => {
+const fetchWishlistContext = async (wishlistItemId, productId) => {
+  if (!wishlistItemId) return null;
+
+  try {
+    const response = await fetch(`/medusa-wishlist/items/${encodeURIComponent(wishlistItemId)}`);
+    const data = await response.json();
+    const item = data.wishlistItem;
+    if (!response.ok || !item || item.productId !== productId) return null;
+
+    return {
+      itemId: item.id,
+      variantId: item.variantId || null,
+      selectedOptions: item.selectedOptions || null,
+    };
+  } catch (error) {
+    return null;
+  }
+};
+
+const setData = async (product) => {
   productPageState.product = product;
+  productPageState.selectedOptions = {};
+  productPageState.selectedVariant = null;
+  productPageState.explicitlySelectedOptionIds = new Set();
+  await (window.customerSessionReady || Promise.resolve({ status: "anonymous" }));
+  const searchParams = new URLSearchParams(location.search);
+  const wishlistItemId = searchParams.get("wishlistItemId");
+  productPageState.wishlistContext = await fetchWishlistContext(wishlistItemId, product.id);
   document.title = `Product - ${product.name}`;
   document.querySelector(".product-brand").textContent = product.name;
   document.querySelector(".product-short-des").textContent = product.shortDes;
@@ -517,7 +703,7 @@ const getProductDataId = async (productId) => {
 
   try {
     const product = await fetchProduct(productId);
-    setData(product);
+    await setData(product);
     await loadRelatedProducts(product);
   } catch (error) {
     productState.textContent = "Product unavailable.";

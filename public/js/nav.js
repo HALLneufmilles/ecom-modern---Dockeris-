@@ -1,3 +1,5 @@
+localStorage.removeItem("medusa_cart_id");
+
 // const { DOMAIN } = require("../../server.js");
 // console.log(DOMAIN);
 const createNav = () => {
@@ -45,6 +47,28 @@ const userPopup = document.querySelector(".login-logout-popup");
 const popuptext = document.querySelector(".account-info");
 const actionBtn = document.querySelector("#user-btn");
 
+window.customerSessionState = { status: "pending", user: null };
+window.customerSessionReady = (async () => {
+  try {
+    const response = await fetch("/medusa-customer/session", { cache: "no-store" });
+    const data = await response.json().catch(() => ({}));
+
+    if (response.ok && data.authenticated === true && data.user?.email) {
+      sessionStorage.setItem("user", JSON.stringify(data.user));
+      return (window.customerSessionState = { status: "authenticated", user: data.user });
+    }
+
+    if (response.ok || response.status === 401) {
+      sessionStorage.removeItem("user");
+      return (window.customerSessionState = { status: "anonymous", user: null });
+    }
+  } catch (error) {
+    // Une indisponibilité temporaire ne doit pas invalider un cache UI existant.
+  }
+
+  return (window.customerSessionState = { status: "unavailable", user: null });
+})();
+
 userImageButton.addEventListener("click", (event) => {
   event.stopPropagation();
   userPopup.classList.toggle("hide");
@@ -57,18 +81,32 @@ window.addEventListener("click", (event) => {
   userPopup.classList.add("hide");
 });
 
-window.onload = () => {
-  let user = JSON.parse(sessionStorage.user || null);
-  if (user != null) {
+const setLoggedOutNavigation = () => {
+  popuptext.innerHTML = "log in to place order";
+  actionBtn.innerHTML = "log in";
+  actionBtn.disabled = false;
+  actionBtn.addEventListener("click", () => {
+    location.href = "/login";
+  }, { once: true });
+};
+
+window.addEventListener("load", async () => {
+  popuptext.textContent = "checking account session";
+  actionBtn.disabled = true;
+
+  const session = await window.customerSessionReady;
+  const user = session.status === "authenticated" ? session.user : null;
+  if (user) {
     // means user is logged in
     popuptext.innerHTML = `log in as, ${user.name}`;
     actionBtn.innerHTML = "log out";
+    actionBtn.disabled = false;
     actionBtn.addEventListener("click", async () => {
       const dataToSend = {
-        email: JSON.parse(sessionStorage.user).email
+        email: user.email
       };
-      if (JSON.parse(sessionStorage.user).seller) {
-        dataToSend.tagsSeller = JSON.parse(sessionStorage.user).tagsSeller;
+      if (user.seller) {
+        dataToSend.tagsSeller = user.tagsSeller;
       }
       actionBtn.disabled = true;
       try {
@@ -82,20 +120,20 @@ window.onload = () => {
           await fetch("/logout", { method: "POST" });
         } finally {
           sessionStorage.clear();
-          localStorage.clear();
+          localStorage.removeItem("medusa_cart_id");
           location.replace("/");
         }
       }
     });
+  } else if (session.status === "unavailable") {
+    popuptext.textContent = "account temporarily unavailable";
+    actionBtn.textContent = "log in";
+    actionBtn.disabled = true;
   } else {
     // user is logged out
-    popuptext.innerHTML = "log in to place order";
-    actionBtn.innerHTML = "log in";
-    actionBtn.addEventListener("click", () => {
-      location.href = "/login";
-    });
+    setLoggedOutNavigation();
   }
-};
+});
 
 // search box
 

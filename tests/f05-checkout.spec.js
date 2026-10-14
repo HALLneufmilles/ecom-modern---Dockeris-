@@ -51,9 +51,9 @@ test("F-05 - le Panier ignore une ancienne livraison jusqu'au choix Checkout cou
 
   await page.addInitScript(({ cartId }) => {
     sessionStorage.setItem("user", JSON.stringify({ name: "Checkout test", email: "checkout@example.com", seller: false }));
-    localStorage.setItem("medusa_cart_id", cartId);
+    sessionStorage.setItem("medusa_cart_id", cartId);
   }, { cartId });
-  await page.route(`**/medusa-cart/${cartId}`, (route) => route.fulfill({
+  await page.route("**/medusa-cart/current", (route) => route.fulfill({
     status: 200,
     contentType: "application/json",
     body: JSON.stringify({ cart: currentCart }),
@@ -129,7 +129,7 @@ test("F-05 - collecte l'identité de livraison sans billing storefront", async (
       body: JSON.stringify({ variantId: variant.id, quantity: 1 }),
     });
     const { cart } = await response.json();
-    localStorage.setItem("medusa_cart_id", cart.id);
+    sessionStorage.setItem("medusa_cart_id", cart.id);
     return { cart, productName: product.name };
   });
 
@@ -282,10 +282,10 @@ test("F-05 - synchronise livraison, quantités, totaux Medusa et erreurs de chec
       email: "playwright@example.com",
       seller: false,
     }));
-    localStorage.setItem("medusa_cart_id", cartId);
+    sessionStorage.setItem("medusa_cart_id", cartId);
   }, { cartId });
 
-  await page.route(`**/medusa-cart/${cartId}`, (route) => route.fulfill({
+  await page.route("**/medusa-cart/current", (route) => route.fulfill({
     status: 200,
     contentType: "application/json",
     body: JSON.stringify({ cart: currentCart }),

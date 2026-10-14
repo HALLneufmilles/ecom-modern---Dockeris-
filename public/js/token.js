@@ -1,5 +1,7 @@
 let char = `123abcde.fmnopqlABCDE@FJKLMNOPQRSTUVWXYZ456789stuvwxyz0!#$%&ijkrgh'*+-/=?^_${"`"}{|}~`;
 
+localStorage.removeItem("medusa_cart_id");
+
 const generateToken = (key) => {
   let token = "";
   for (let i = 0; i < key.length; i++) {
@@ -60,9 +62,9 @@ const processData = (data) => {
     // sessionStorage.user = JSON.stringify(user);
     sessionStorage.setItem("user", JSON.stringify(user));
     if (data.cartId) {
-      localStorage.setItem("medusa_cart_id", data.cartId);
+      sessionStorage.setItem("medusa_cart_id", data.cartId);
     } else {
-      localStorage.removeItem("medusa_cart_id");
+      sessionStorage.removeItem("medusa_cart_id");
     }
     localStorage.removeItem("wishlist");
 
