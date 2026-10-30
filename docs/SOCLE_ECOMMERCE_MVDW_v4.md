@@ -1,4 +1,4 @@
-# Socle e-commerce MVDW v3
+# Socle e-commerce MVDW v4
 
 ## Table des matières
 
@@ -25,6 +25,7 @@
 
 | Version | Date de publication | Modification                                                                                                                                                                                                                                                                                 | Chapitre / paragraphe concerné                                                                   |
 | ------- | ------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------ |
+| v4      | 30/10/2026          | Consolidation du jalon Phase A : disponibilité et validation finale du stock ; Checkout invité protégé, paiement invité encore désactivé ; accès aux Orders invitées par jeton et session internes, sans exposition publique. | `Catalogue / Variantes / Inventaire / Stock` — `Contrôles de disponibilité Phase A` ; `Cart / Payment / Order / Fulfillment` — `Checkout invité` et `Accès sécurisé aux Orders invitées` |
 | v3      | 12/10/2026          | Consolidation du cycle d’authentification Customer : connexion persistante 7 jours, restauration de session côté serveur, distinction entre cookie HttpOnly, jeton Customer Medusa et cache UI, règles de login/logout et gestion des expirations.                                           | `Customer / Auth / Administration` — `Authentification Customer : login, restauration et logout` |
 | v3      | 12/10/2026          | Sécurisation du cycle de vie des paniers invité et Customer : preuve d’accès serveur, partage multi-onglets, absence de fusion automatique au login, rattachement contrôlé au signup et gestion de `cart_unavailable`.                                                                       | `Cart / Payment / Order / Fulfillment` — `Panier invité et panier Customer`                      |
 | v3      | 12/10/2026          | Refonte fonctionnelle F-17 Wishlist : doublons autorisés, `variant_id` optionnel, sélection partielle persistée dans `selected_options`, actions ciblées par `wishlist_item.id`, restauration du contexte et règles d’image/Cart.                                                            | `Wishlist`                                                                                       |
@@ -99,6 +100,24 @@ Cette liste est encore en cours d'étude et pourra évoluer pendant la conceptio
 - `StockLocation` ne représente pas un vendeur ;
 - le storefront utilise la disponibilité Medusa et le Cart Medusa effectue le contrôle final du stock ;
 - aucune métadonnée `vendor` ni aucun mécanisme personnalisé ne détourne actuellement le modèle natif Medusa.
+
+### Contrôles de disponibilité Phase A : ne pas vendre un article devenu indisponible
+
+Un vêtement peut encore être disponible lorsque le visiteur ouvre sa fiche produit, puis être acheté par quelqu'un d'autre quelques minutes plus tard. **La disponibilité affichée n'est donc pas une réservation de stock.**
+
+**Analogie : le billet de spectacle.** Voir une place libre sur le plan de salle ne signifie pas qu'elle restera disponible jusqu'au paiement. Le site doit vérifier la situation à plusieurs moments, et notamment juste avant de confirmer la vente.
+
+Pour la phase A, des contrôles de disponibilité sont prévus et implémentés à plusieurs niveaux du parcours :
+
+1. **Consultation du catalogue et du panier** : le storefront interroge les informations de disponibilité fournies par Medusa pour présenter une situation cohérente au client.
+2. **Préparation et modification du Checkout** : le panier et les quantités sont recontrôlés lorsque le client poursuit sa commande.
+3. **Complétion du Cart** : une validation serveur intervient avant la création définitive de l'Order, afin de ne pas s'appuyer uniquement sur une information affichée plus tôt.
+
+Si un article n'est plus disponible, le parcours doit **signaler explicitement le problème**. Il ne doit pas retirer silencieusement une ligne du panier ou diminuer une quantité sans information claire pour le client.
+
+Ces contrôles ne remplacent ni la gestion native des inventaires Medusa ni les réservations effectuées par les mécanismes prévus pour cela. Ils servent de garde-fous aux étapes sensibles du parcours, y compris lorsque plusieurs clients achètent en même temps.
+
+**État au 30/10/2026 :** les protections Phase A sont implémentées et couvertes par des tests ciblés. La mise en production d'un paiement invité n'est pas pour autant autorisée : elle dépend d'autres garanties sur la finalisation du paiement et de la commande.
 
 ### Décision pour le Socle MVDW v1
 
@@ -203,6 +222,39 @@ Une indisponibilité du Cart ne doit pas être interprétée de la même manièr
 - si Medusa indique qu'une session Customer n'est plus valide (`401`), le cookie Customer peut être nettoyé puis le storefront peut revenir vers un panier invité **uniquement si ce panier invité est lui-même prouvé et autorisé** ;
 - en cas de timeout, d'erreur réseau ou de `5xx`, il ne faut pas basculer silencieusement en mode invité : une panne serveur n'est pas une déconnexion fonctionnelle ;
 - le serveur doit conserver une distinction explicite entre « Customer non authentifié » et « service momentanément indisponible ».
+
+### Checkout invité : parcours disponible, paiement encore fermé (Phase A)
+
+Le panier invité peut désormais poursuivre le Checkout sans ouvrir de compte Customer : renseigner son e-mail et son adresse, puis choisir une livraison. **Le paiement invité reste explicitement désactivé** côté interface et refusé côté serveur à ce stade. Il ne faut donc pas confondre « Checkout invité préparé » et « achat invité entièrement ouvert ».
+
+Le serveur Express et les routes concernées dans Medusa vérifient une **preuve HMAC** associée au panier invité. HMAC signifie *Hash-based Message Authentication Code* : c'est un code calculé à partir des données à protéger et d'un secret connu du serveur. Il sert à déceler un ticket fabriqué ou modifié par un tiers.
+
+**Analogie : le ticket de consigne déjà décrit plus haut.** Le numéro du casier (`cartId`) indique où se trouve le panier ; le ticket signé prouve que le visiteur est autorisé à y accéder. Un e-mail saisi dans le Checkout, même identique à celui d'un Customer existant, n'est pas non plus une preuve d'identité.
+
+Conséquences pratiques :
+
+- Un invité peut saisir un e-mail utilisé par un compte Customer, **sans devenir automatiquement ce Customer** et sans accéder à son panier privé.
+- Le login d'un Customer existant ne fusionne pas son panier avec celui de l'invité ; chaque panier conserve ses propres droits d'accès.
+- Les changements d'e-mail, d'adresse, de livraison et les opérations sensibles du Checkout invité doivent conserver cette vérification d'autorisation. Le panier invité ne doit pas être rattaché à un Customer par la seule égalité des adresses e-mail.
+- Le choix Standard / Express remplace la méthode précédente : les deux frais de livraison ne doivent pas se cumuler.
+- La finalisation de l'achat invité restera bloquée tant que les risques de création d'Order après paiement confirmé (PAY-01 / PAY-02) ne seront pas traités et que leur articulation avec le contrôle final de stock déjà implémenté ne sera pas validée de bout en bout.
+
+### Accès sécurisé aux Orders invitées : fondation interne, pas encore une page publique
+
+Un acheteur invité n'a pas de session Customer pour retrouver ses commandes. Il faudra lui donner un accès limité **à sa propre Order**, sans ouvrir les commandes des autres visiteurs.
+
+**Analogie : deux clés pour consulter un dossier à la réception.**
+
+- Le **jeton d'accès à la commande** est une clé personnelle de longue durée : sa validité prévue est de **90 jours**, avec possibilité future de renouvellement par e-mail.
+- Après vérification de cette clé, le serveur pourra délivrer une **session de consultation** plus courte, de **24 heures fixes**, pour éviter de représenter le jeton principal à chaque consultation.
+- Le serveur enregistre dans PostgreSQL seulement les **empreintes SHA-256** des deux jetons, pas leurs valeurs brutes. Une empreinte est comme la trace numérique d'une clé : elle permet de comparer un justificatif présenté, mais n'est pas la clé elle-même.
+- Le renouvellement ou la révocation du jeton principal invalide également les sessions de consultation précédentes. Les opérations concurrentes sont coordonnées dans des transactions PostgreSQL.
+
+La preuve d'accès doit être vérifiée **à chaque consultation**. Une session est refusée lorsque son jeton parent n'est plus valable ou lorsque l'Order n'est plus une commande invitée finalisée. La possession d'un simple `orderId` ne suffit jamais.
+
+**État réellement implémenté au 30/10/2026 :** le module interne `guest-order-access`, son modèle d'accès et son modèle `guest_order_session` sont créés ; les deux migrations PostgreSQL sont appliquées en local. Les tests ciblés du service, du médiateur et de PostgreSQL ont réussi (**21/21** lors de ce jalon). L'accès natif `GET /store/orders/:id` reste protégé pour les Customers autorisés ; il n'a pas été ouvert aux invités.
+
+**Pas encore implémenté :** échange HTTP public du jeton, cookie de consultation invité, page de suivi de commande invitée, envoi et renouvellement du lien par e-mail, limitations anti-abus et paiement invité. Le choix d'un lien contenant le jeton dans le fragment d'URL (partie après `#`), de sa suppression rapide dans le navigateur et d'un cookie `HttpOnly` pour la session de 24 heures relève du **parcours futur validé**, et non d'une fonctionnalité actuellement disponible.
 
 ### Décision pour le Socle MVDW v1
 
@@ -881,4 +933,11 @@ Sixième étude consolidée et validée :
 - périmètre : F-17 Wishlist persistante ;
 - statut : « Modèle métier consolidé. »
 
-La Wishlist supporte désormais les doublons volontaires, les lignes génériques, les sélections partielles via `selected_options`, les ProductVariant complètes et les actions ciblées par `wishlist_item.id`. Les règles permanentes sont consignées dans la section « Wishlist ».
+La Wishlist supporte désormais les doublons volontaires, les lignes génériques, les sélections partielles via `selected_options`, les ProductVariant complètes et les actions ciblées par `wishlist_item.id`.
+
+Septième jalon documenté (Phase A, 30/10/2026) :
+
+- périmètre : contrôle du stock aux étapes sensibles, Checkout invité protégé et fondation interne des accès/sessions aux Orders invitées ;
+- statut : « Implémentation interne et tests ciblés validés ; paiement et consultation publique invités non activés ».
+
+Les limites et mécanismes de protection sont consignés dans les sections « Catalogue / Variantes / Inventaire / Stock » et « Cart / Payment / Order / Fulfillment ». Les règles permanentes sont consignées dans la section « Wishlist ».

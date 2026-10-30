@@ -1,6 +1,7 @@
 import type { AuthenticatedMedusaRequest, MedusaResponse } from "@medusajs/framework/http"
 import { MedusaError, Modules } from "@medusajs/framework/utils"
 import type { ICartModuleService } from "@medusajs/types"
+import { canAccessStoreCart } from "../../../../../guest-cart-access"
 
 export async function POST(
   req: AuthenticatedMedusaRequest,
@@ -9,10 +10,9 @@ export async function POST(
   const cartService = req.scope.resolve(Modules.CART) as ICartModuleService
   const [cart] = await cartService.listCarts({
     id: req.params.id,
-    customer_id: req.auth_context.actor_id,
   })
 
-  if (!cart) {
+  if (!cart || !canAccessStoreCart(req, cart)) {
     throw new MedusaError(MedusaError.Types.NOT_FOUND, "Cart not found")
   }
 

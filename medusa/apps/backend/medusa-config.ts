@@ -41,6 +41,9 @@ module.exports = defineConfig({
       resolve: "./src/modules/managed-media",
     },
     {
+      resolve: "./src/modules/guest-order-access",
+    },
+    {
       resolve: "@medusajs/medusa/file",
       options: {
         providers: [

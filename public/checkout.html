@@ -21,6 +21,17 @@
 
     <div class="form">
       <h1 class="heading">checkout</h1>
+      <p class="text">contact</p>
+      <div class="field-group">
+        <label for="email">Adresse e-mail <span aria-hidden="true">*</span></label>
+        <input type="email" id="email" autocomplete="off" placeholder="adresse e-mail" required aria-describedby="email-error" />
+        <small class="field-error" id="email-error" aria-live="polite"></small>
+      </div>
+      <div class="field-group">
+        <label for="phone">Téléphone</label>
+        <input type="tel" id="phone" autocomplete="tel" placeholder="téléphone" aria-describedby="phone-error" />
+        <small class="field-error" id="phone-error" aria-live="polite"></small>
+      </div>
       <p class="text">delivery address</p>
       <div class="two-input-container">
         <div class="field-group">
@@ -85,6 +96,7 @@
       <p class="text checkout-subheading">secure payment</p>
       <div id="payment-element" hidden></div>
       <p class="checkout-status" aria-live="polite"></p>
+      <a class="checkout-btn checkout-cart-return" href="/cart" hidden>Retour au panier</a>
     </div>
 
     <div class="cart-section">
@@ -100,7 +112,7 @@
           <div class="summary-row" data-summary-row="discount_total" hidden><span>Discount</span><strong data-summary="discount_total">$00</strong></div>
           <div class="summary-row" data-summary-row="tax_total" hidden><span>Taxes</span><strong data-summary="tax_total">$00</strong></div>
           <div class="summary-row summary-total"><span>Total</span><strong class="bill" data-summary="total">$00</strong></div>
-          <button class="place-order-btn" disabled>place order</button>
+          <button class="place-order-btn" disabled>Passez commande</button>
         </div>
       </div>
     </div>

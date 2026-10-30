@@ -1,7 +1,7 @@
 import { createHmac, timingSafeEqual } from "crypto"
 import type { AuthenticatedMedusaRequest, MedusaRequest, MedusaResponse } from "@medusajs/framework/http"
 import { ContainerRegistrationKeys, Modules, remoteQueryObjectFromString } from "@medusajs/framework/utils"
-import type { ICartModuleService } from "@medusajs/types"
+import type { ICartModuleService, IOrderModuleService } from "@medusajs/types"
 
 const COOKIE_NAME = "mvdw_guest_cart_proof"
 const PROOF_SECONDS = 7 * 24 * 60 * 60
@@ -48,6 +48,31 @@ const cartIdFromPath = (req: MedusaRequest): string | null => {
   }
 }
 
+const orderIdFromPath = (req: MedusaRequest): string | null => {
+  const match = req.originalUrl.match(/^\/store\/orders\/([^/?]+)(?:\?|$)/)
+  if (!match) return null
+  try {
+    return decodeURIComponent(match[1])
+  } catch {
+    return null
+  }
+}
+
+export const canAccessStoreCart = (
+  req: MedusaRequest,
+  cart: { id: string; customer_id?: string | null }
+) => {
+  const authContext = (req as AuthenticatedMedusaRequest).auth_context
+  return cart.customer_id
+    ? authContext?.actor_type === "customer" && authContext.actor_id === cart.customer_id
+    : verifyGuestCartProof(readGuestProof(req), cart.id)
+}
+
+export const canAccessGuestStoreCart = (
+  req: MedusaRequest,
+  cart: { id: string; customer_id?: string | null }
+) => !cart.customer_id && verifyGuestCartProof(readGuestProof(req), cart.id)
+
 export const protectStoreCart = async (
   req: MedusaRequest,
   res: MedusaResponse,
@@ -63,11 +88,7 @@ export const protectStoreCart = async (
       return res.status(404).json({ message: "Cart not found" })
     }
 
-    const authContext = (req as AuthenticatedMedusaRequest).auth_context
-    const permitted = cart.customer_id
-      ? authContext?.actor_type === "customer" && authContext.actor_id === cart.customer_id
-      : verifyGuestCartProof(readGuestProof(req), cartId)
-    if (!permitted) return res.status(404).json({ message: "Cart not found" })
+    if (!canAccessStoreCart(req, cart)) return res.status(404).json({ message: "Cart not found" })
     return next()
   } catch (error) {
     return next(error as Error)
@@ -79,6 +100,38 @@ export const protectStoreCartPath = (
   res: MedusaResponse,
   next: (error?: Error) => void
 ) => protectStoreCart(req, res, next, cartIdFromPath(req))
+
+// Store API v2.19 exposes GET /store/orders/:id without a Customer middleware.
+// Keep guest Orders closed until their separate, token-based access route exists.
+export const protectStoreOrderPath = async (
+  req: MedusaRequest,
+  res: MedusaResponse,
+  next: (error?: Error) => void
+) => {
+  const orderId = orderIdFromPath(req)
+  if (!orderId) return res.status(404).json({ message: "Order not found" })
+
+  try {
+    const orderService = req.scope.resolve(Modules.ORDER) as IOrderModuleService
+    const [order] = await orderService.listOrders(
+      { id: orderId },
+      { select: ["id", "customer_id"] }
+    )
+    const authContext = (req as AuthenticatedMedusaRequest).auth_context
+
+    if (
+      !order?.customer_id
+      || authContext?.actor_type !== "customer"
+      || authContext.actor_id !== order.customer_id
+    ) {
+      return res.status(404).json({ message: "Order not found" })
+    }
+
+    return next()
+  } catch (error) {
+    return next(error as Error)
+  }
+}
 
 export const protectStoreCartBody = (
   req: MedusaRequest,

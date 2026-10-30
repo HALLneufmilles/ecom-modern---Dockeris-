@@ -2,14 +2,20 @@ const placeOrderBtn = document.querySelector(".place-order-btn");
 const shippingOptionsElement = document.querySelector("#shipping-options");
 const paymentElementContainer = document.querySelector("#payment-element");
 const checkoutStatus = document.querySelector(".checkout-status");
+const checkoutCartReturn = document.querySelector(".checkout-cart-return");
+const checkoutEmailInput = document.querySelector("#email");
+const checkoutEmailError = document.querySelector("#email-error");
+const placeOrderLabel = "Passez commande";
 
 let checkoutCart = null;
+let checkoutSession = null;
 let stripe = null;
 let stripeElements = null;
 let paymentPrepared = false;
 let checkoutReady = false;
 let checkoutBusy = false;
 let checkoutResetPromise = null;
+let checkoutPaymentAvailable = false;
 
 const requestCheckout = async (path, options) => {
   const response = await fetch(path, options);
@@ -18,6 +24,8 @@ const requestCheckout = async (path, options) => {
   if (!response.ok) {
     const error = new Error(data.error || "checkout_unavailable");
     error.status = response.status;
+    error.code = data.error;
+    error.data = data;
     throw error;
   }
 
@@ -29,19 +37,33 @@ const setCheckoutStatus = (message, error = false) => {
   checkoutStatus.classList.toggle("error", error);
 };
 
+const showInventoryCheckoutError = () => {
+  checkoutReady = false;
+  setCheckoutStatus(
+    "Un ou plusieurs articles de votre panier ne sont plus disponibles dans la quantité demandée. Retournez au panier pour modifier la quantité, enregistrer l’article dans votre liste d’envies si elle est disponible, ou le retirer.",
+    true
+  );
+  checkoutCartReturn.hidden = false;
+  setCheckoutBusy(false);
+};
+
+const clearInventoryCheckoutError = () => {
+  checkoutCartReturn.hidden = true;
+};
+
 const setCheckoutBusy = (busy) => {
   checkoutBusy = busy;
   window.medusaCartBusy = busy;
-  placeOrderBtn.disabled = busy || !checkoutReady || !checkoutCart?.items?.length;
+  placeOrderBtn.disabled = busy || !checkoutReady || !checkoutCart?.items?.length || !checkoutPaymentAvailable;
   document.querySelectorAll('.shipping-option input, .cart button').forEach((element) => {
     element.disabled = busy || paymentPrepared || !checkoutReady || !checkoutCart?.items?.length;
   });
   placeOrderBtn.textContent = busy
-    ? "processing..."
-    : "place order";
+    ? "Traitement..."
+    : placeOrderLabel;
 };
 
-const addressFields = ["last_name", "first_name", "address", "street", "city", "state", "pincode", "landmark", "country"];
+const addressFields = ["last_name", "first_name", "address", "street", "city", "state", "pincode", "landmark", "country", "phone"];
 const requiredAddressFields = ["last_name", "first_name", "address", "street", "city", "state", "pincode", "country"];
 const addressMaxLengths = {
   last_name: 80,
@@ -52,7 +74,9 @@ const addressMaxLengths = {
   state: 80,
   pincode: 16,
   landmark: 120,
+  phone: 32,
 };
+const checkoutEmailPattern = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const postalCodePatterns = {
   fr: /^\d{5}$/,
   de: /^\d{5}$/,
@@ -78,12 +102,57 @@ const clearAddressErrors = (prefix = "") => {
   });
 };
 
+const displayCheckoutEmailError = (message) => {
+  if (message) checkoutEmailInput.setAttribute("aria-invalid", "true");
+  else checkoutEmailInput.removeAttribute("aria-invalid");
+  checkoutEmailError.textContent = message || "";
+};
+
+const collectCheckoutEmail = () => checkoutEmailInput.value.trim();
+
+const validateCheckoutEmail = () => {
+  const email = collectCheckoutEmail();
+  let error = "";
+  if (!email) error = "This field is required.";
+  else if (email.length > 254 || !checkoutEmailPattern.test(email)) error = "Enter a valid email address.";
+  displayCheckoutEmailError(error);
+  return !error;
+};
+
+const applyCheckoutContact = (checkoutData) => {
+  const contact = checkoutData.checkoutContact || {};
+  const customerCheckout = checkoutData.checkoutMode === "customer"
+    || checkoutSession?.status === "authenticated";
+  checkoutEmailInput.value = customerCheckout
+    ? (contact.email || checkoutSession?.user?.email || "")
+    : (contact.email || checkoutData.cart?.email || "");
+  checkoutEmailInput.autocomplete = customerCheckout ? "email" : "off";
+  checkoutEmailInput.readOnly = customerCheckout;
+  checkoutEmailInput.setAttribute("aria-readonly", String(customerCheckout));
+  document.querySelector("#phone").value = contact.phone || "";
+  displayCheckoutEmailError("");
+};
+
+const showGuestPaymentUnavailable = () => {
+  if (!checkoutPaymentAvailable) {
+    setCheckoutStatus("Le paiement pour les invités est temporairement indisponible.");
+  }
+};
+
+const showCheckoutLoadError = () => {
+  setCheckoutStatus("Le chargement du Checkout est temporairement indisponible. Réessayez.", true);
+};
+
 const resetCheckoutForm = () => {
   addressFields.forEach((field) => {
     const element = document.querySelector(`#${field}`);
     element.value = field === "country" ? "fr" : "";
   });
   clearAddressErrors();
+  checkoutEmailInput.value = "";
+  checkoutEmailInput.readOnly = false;
+  checkoutEmailInput.setAttribute("aria-readonly", "false");
+  displayCheckoutEmailError("");
   paymentElementContainer.replaceChildren();
   paymentElementContainer.hidden = true;
   shippingOptionsElement.querySelectorAll("input").forEach((input) => {
@@ -92,6 +161,7 @@ const resetCheckoutForm = () => {
   stripe = null;
   stripeElements = null;
   paymentPrepared = false;
+  clearInventoryCheckoutError();
   setCheckoutStatus("");
 };
 
@@ -155,6 +225,12 @@ addressFields.forEach((field) => {
   });
 });
 
+["input", "blur"].forEach((event) => {
+  checkoutEmailInput.addEventListener(event, () => {
+    if (checkoutEmailInput.hasAttribute("aria-invalid") || event === "blur") validateCheckoutEmail();
+  });
+});
+
 const renderPriceSummary = (cart) => {
   const currencyCode = cart.currency_code;
   ["subtotal", "shipping_total", "discount_total", "tax_total", "total"].forEach((field) => {
@@ -189,7 +265,12 @@ const updateShippingMethod = async (shippingOptionId) => {
   if (checkoutBusy || !checkoutReady || paymentPrepared || !checkoutCart?.items?.length) return;
   clearAddressErrors();
   const address = collectAddress();
-  if (!validateAddress(address)) return;
+  const emailValid = validateCheckoutEmail();
+  const addressValid = validateAddress(address);
+  if (!emailValid || !addressValid) {
+    if (!emailValid) checkoutEmailInput.focus();
+    return;
+  }
 
   setCheckoutBusy(true);
   setCheckoutStatus("Updating delivery method...");
@@ -198,15 +279,20 @@ const updateShippingMethod = async (shippingOptionId) => {
       method: "POST",
       headers: new Headers({ "Content-Type": "application/json" }),
       body: JSON.stringify({
+        email: collectCheckoutEmail(),
         address,
         shippingOptionId,
       }),
     });
     if (!data.cart?.id) throw new Error("invalid_shipping_response");
     renderCart(data.cart);
-    setCheckoutStatus("");
+    showGuestPaymentUnavailable();
   } catch (error) {
-    setCheckoutStatus(error.message || "Unable to update the delivery method.", true);
+    if (error.code === "insufficient_inventory") {
+      showInventoryCheckoutError();
+    } else {
+      setCheckoutStatus(error.message || "Unable to update the delivery method.", true);
+    }
   } finally {
     setCheckoutBusy(false);
   }
@@ -284,14 +370,17 @@ const resetCheckoutEntry = async () => {
       `/medusa-checkout/${encodeURIComponent(checkoutCart.id)}/reset`,
       { method: "POST" }
     );
-    if (!checkoutData.cart?.id || !checkoutData.stripeCheckoutAvailable) {
+    if (!checkoutData.cart?.id) {
       throw new Error("invalid_checkout_response");
     }
 
     renderCart(checkoutData.cart);
     renderShippingOptions(checkoutData.shippingOptions, checkoutData.cart.currency_code);
+    applyCheckoutContact(checkoutData);
+    checkoutPaymentAvailable = checkoutData.checkoutPaymentAvailable !== false;
     checkoutReady = true;
     setCheckoutBusy(false);
+    showGuestPaymentUnavailable();
     return checkoutData;
   })();
 
@@ -299,6 +388,7 @@ const resetCheckoutEntry = async () => {
     return await checkoutResetPromise;
   } finally {
     checkoutResetPromise = null;
+    if (!checkoutReady) setCheckoutBusy(false);
   }
 };
 
@@ -310,10 +400,7 @@ const initializeCheckout = async () => {
     return;
   }
 
-  if (session.status !== "authenticated") {
-    location.replace("/login");
-    return;
-  }
+  checkoutSession = session;
 
   checkoutCart = await window.medusaCartReady;
   if (!checkoutCart?.id || !checkoutCart.items?.length) {
@@ -343,29 +430,42 @@ const initializeCheckout = async () => {
       location.replace("/login");
       return;
     }
-    setCheckoutStatus("Checkout is temporarily unavailable.", true);
+    if (error.code === "insufficient_inventory") {
+      showInventoryCheckoutError();
+    } else {
+      showCheckoutLoadError();
+    }
     placeOrderBtn.disabled = true;
   }
 };
 
 window.addEventListener("pageshow", async (event) => {
   const session = await (window.customerSessionReady || Promise.resolve({ status: "anonymous" }));
-  if (!event.persisted || session.status !== "authenticated" || !checkoutCart?.id || !checkoutCart.items?.length) return;
+  if (!event.persisted || session.status === "unavailable" || !checkoutCart?.id || !checkoutCart.items?.length) return;
 
   try {
     await resetCheckoutEntry();
   } catch (error) {
-    setCheckoutStatus("Checkout is temporarily unavailable.", true);
+    if (error.code === "insufficient_inventory") {
+      showInventoryCheckoutError();
+    } else {
+      showCheckoutLoadError();
+    }
     placeOrderBtn.disabled = true;
   }
 });
 
 const preparePayment = async () => {
-  if (checkoutBusy || !checkoutReady || !checkoutCart?.items?.length) return;
+  if (checkoutBusy || !checkoutReady || !checkoutCart?.items?.length || !checkoutPaymentAvailable) return;
   clearAddressErrors();
   const address = collectAddress();
   const shippingOptionId = selectedShippingOptionId();
-  if (!validateAddress(address)) return;
+  const emailValid = validateCheckoutEmail();
+  const addressValid = validateAddress(address);
+  if (!emailValid || !addressValid) {
+    if (!emailValid) checkoutEmailInput.focus();
+    return;
+  }
   if (!shippingOptionId) {
     showAlert("select a delivery method");
     return;
@@ -378,6 +478,7 @@ const preparePayment = async () => {
     headers: new Headers({ "Content-Type": "application/json" }),
     body: JSON.stringify({
       address,
+      email: collectCheckoutEmail(),
       shippingOptionId,
     }),
   });
@@ -395,11 +496,16 @@ const preparePayment = async () => {
 };
 
 const startHostedStripeCheckout = async () => {
-  if (checkoutBusy || !checkoutReady || !checkoutCart?.items?.length) return;
+  if (checkoutBusy || !checkoutReady || !checkoutCart?.items?.length || !checkoutPaymentAvailable) return;
   clearAddressErrors();
   const address = collectAddress();
   const shippingOptionId = selectedShippingOptionId();
-  if (!validateAddress(address)) return;
+  const emailValid = validateCheckoutEmail();
+  const addressValid = validateAddress(address);
+  if (!emailValid || !addressValid) {
+    if (!emailValid) checkoutEmailInput.focus();
+    return;
+  }
   if (!shippingOptionId) {
     showAlert("select a delivery method");
     return;
@@ -414,6 +520,7 @@ const startHostedStripeCheckout = async () => {
       headers: new Headers({ "Content-Type": "application/json" }),
       body: JSON.stringify({
         address,
+        email: collectCheckoutEmail(),
         shippingOptionId,
       }),
     }
@@ -455,7 +562,11 @@ placeOrderBtn.addEventListener("click", async () => {
   try {
     await startHostedStripeCheckout();
   } catch (error) {
-    setCheckoutStatus(error.message || "Checkout is temporarily unavailable.", true);
+    if (error.code === "insufficient_inventory") {
+      showInventoryCheckoutError();
+    } else {
+      setCheckoutStatus(error.message || "Checkout is temporarily unavailable.", true);
+    }
     setCheckoutBusy(false);
   }
 });

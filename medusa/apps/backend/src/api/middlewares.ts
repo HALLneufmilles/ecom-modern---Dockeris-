@@ -14,6 +14,7 @@ import {
   protectStoreCartBody,
   protectStoreCartPath,
   protectStoreCartQuery,
+  protectStoreOrderPath,
 } from "./guest-cart-access"
 
 export const MAX_ADMIN_IMAGE_UPLOADS = 10
@@ -112,6 +113,11 @@ export default defineMiddlewares({
       middlewares: [protectStoreCartPath],
     },
     {
+      matcher: "/store/orders/*",
+      methods: ["GET"],
+      middlewares: [protectStoreOrderPath],
+    },
+    {
       matcher: "/store/payment-collections",
       method: "POST",
       middlewares: [protectStoreCartBody],
@@ -133,14 +139,6 @@ export default defineMiddlewares({
     },
     {
       matcher: "/store/customers/me/wishlist*",
-      middlewares: [authenticate("customer", ["bearer", "session"])],
-    },
-    {
-      matcher: "/store/carts/*/shipping-methods/replace",
-      middlewares: [authenticate("customer", ["bearer", "session"])],
-    },
-    {
-      matcher: "/store/carts/*/checkout/reset",
       middlewares: [authenticate("customer", ["bearer", "session"])],
     },
     {

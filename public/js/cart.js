@@ -42,11 +42,11 @@ const createSmallCard = (item, { mutable = false, action, moveToWishlist = false
     </div>` : `
     <div class="cart-quantity">
       <div class="item-counter">
-        <button class="counter-btn decrement"${mutable ? "" : " disabled"}>-</button>
+        <button class="counter-btn decrement"${mutable && item.quantity > 1 ? "" : " disabled"}>-</button>
         <p class="item-count">${item.quantity}</p>
         <button class="counter-btn increment"${mutable && !item.incrementDisabled ? "" : " disabled"}>+</button>
       </div>
-      ${item.inventoryLimited ? `<p class="cart-inventory-message" role="alert">Quantité max en stock.</p>` : ""}
+      ${item.inventoryMessage ? `<p class="cart-inventory-message" role="alert">${item.inventoryMessage}</p>` : ""}
     </div>`;
   const moveToWishlistAction = moveToWishlist ? `
     <div class="cart-wishlist-actions">
@@ -91,17 +91,53 @@ const requestCart = async (path, options) => {
     throw error;
   }
 
+  if (data.inventory) data.cart.inventory = data.inventory;
   return data.cart;
 };
 
 const inventoryLimitedLineIds = new Set();
 
+const inventoryMessageForLine = (line) => {
+  if (line.sufficient) return "";
+  if (typeof line.available_quantity === "number") {
+    return line.available_quantity > 0
+      ? `Stock disponible : ${line.available_quantity}.`
+      : "Cet article n’est plus disponible.";
+  }
+  return "Cet article n’est plus disponible dans ce canal de vente.";
+};
+
+const renderCartInventoryStatus = (inventory) => {
+  const status = document.querySelector(".cart-stock-status");
+  if (!status) return;
+  if (!inventory || inventory.sufficient) {
+    status.hidden = true;
+    status.textContent = "";
+    return;
+  }
+  const wishlistAvailable = window.storefrontConfig?.features?.wishlist === true && hasRestoredCustomerSession();
+  status.textContent = "Un ou plusieurs articles de votre panier ne sont plus disponibles dans la quantité demandée. "
+    + "Nous vérifions les stocks à plusieurs étapes du parcours de commande pour éviter de vous faire payer un article indisponible. "
+    + `Vous pouvez modifier la quantité${wishlistAvailable ? ", enregistrer cet article dans votre liste d’envies" : ""} ou le retirer du panier à l’aide de la croix.`;
+  status.hidden = false;
+};
+
+const syncCartCheckoutAvailability = (inventory) => {
+  const checkoutButton = document.querySelector(".checkout-btn");
+  if (!checkoutButton) return;
+  const unavailable = inventory?.sufficient === false;
+  checkoutButton.classList.toggle("disabled", unavailable);
+  checkoutButton.setAttribute("aria-disabled", String(unavailable));
+  checkoutButton.tabIndex = unavailable ? -1 : 0;
+};
+
 const renderCart = (cart) => {
   const element = document.querySelector(".cart");
+  const inventoryByLineId = new Map((cart.inventory?.lines || []).map((line) => [line.line_id, line]));
   const items = (cart.items || []).map((item) => ({
     ...normalizeMedusaItem(item, cart.currency_code),
-    incrementDisabled: inventoryLimitedLineIds.has(item.id),
-    inventoryLimited: inventoryLimitedLineIds.has(item.id),
+    incrementDisabled: inventoryLimitedLineIds.has(item.id) || inventoryByLineId.get(item.id)?.sufficient === false,
+    inventoryMessage: inventoryMessageForLine(inventoryByLineId.get(item.id) || { sufficient: true }),
   }));
 
   element.innerHTML = "";
@@ -110,11 +146,13 @@ const renderCart = (cart) => {
   } else {
     items.forEach((item) => element.insertAdjacentHTML("beforeend", createSmallCard(item, {
       mutable: true,
-      moveToWishlist: window.storefrontConfig?.features?.wishlist === true,
+      moveToWishlist: window.storefrontConfig?.features?.wishlist === true && hasRestoredCustomerSession(),
     })));
   }
 
   document.querySelector(".bill").textContent = formatCartPrice(Number(cart.item_subtotal || 0), cart.currency_code);
+  renderCartInventoryStatus(cart.inventory);
+  syncCartCheckoutAvailability(cart.inventory);
   bindCartEvents(cart.id, items);
   window.currentMedusaCart = cart;
   window.dispatchEvent(new CustomEvent("medusa-cart-updated", { detail: cart }));
@@ -245,14 +283,20 @@ const bindCartEvents = (cartId, items) => {
   });
 };
 
+document.querySelector(".checkout-btn")?.addEventListener("click", (event) => {
+  if (event.currentTarget.getAttribute("aria-disabled") === "true") event.preventDefault();
+});
+
 const loadMedusaCart = async () => {
   const element = document.querySelector(".cart");
 
   try {
     const response = await fetch("/medusa-cart/current");
     if (!response.ok) throw new Error("Cart is unavailable");
-    const { cart } = await response.json();
+    const data = await response.json();
+    const { cart } = data;
     if (cart) {
+      if (data.inventory) cart.inventory = data.inventory;
       sessionStorage.setItem("medusa_cart_id", cart.id);
       return renderCart(cart);
     }

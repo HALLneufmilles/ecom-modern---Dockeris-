@@ -1,4 +1,4 @@
-# INFRASTRUCTURE MEDUSA + STOREFRONT — v8
+# INFRASTRUCTURE MEDUSA + STOREFRONT — v9
 
 ## Table des matières
 
@@ -31,7 +31,10 @@
 13. [Propriété et réutilisation du code](#13-propriété-et-réutilisation-du-code)
 14. [Socle e-commerce MVDW configurable et évolution multi-vendeur](#14-socle-e-commerce-mvdw-configurable-et-évolution-multi-vendeur)
 15. [Architecture locale Docker / Docker Compose](#15-architecture-locale-docker--docker-compose)
+    - [15.12 PostgreSQL : module guest-order-access et migrations](#1512-postgresql--module-guest-order-access-et-migrations)
 16. [Paiement Stripe, webhook et création d’Order Medusa](#16-paiement-stripe-webhook-et-création-dorder-medusa)
+    - [16.14 Statut du paiement invité dans la phase A](#1614-statut-du-paiement-invité-dans-la-phase-a)
+    - [16.15 Accès aux Orders invitées : jetons et sessions internes](#1615-accès-aux-orders-invitées--jetons-et-sessions-internes)
 17. [Sources techniques principales](#17-sources-techniques-principales)
 
 ---
@@ -40,6 +43,7 @@
 
 | Version | Date de publication | Modification | Chapitre / paragraphe concerné |
 |---|---|---|---|
+| v9 | 30/10/2026 | Documentation du module interne `guest-order-access`, des jetons/sessions invitées, des deux migrations PostgreSQL et de leur application contrôlée ; statut du paiement invité et choix futur de Resend pour les e-mails transactionnels. | `3.2 Email transactionnel`, `5.1 Configuration production`, `7. Options`, `14.4 Providers`, `15.12 PostgreSQL`, `16.14 Paiement invité`, `16.15 Orders invitées` |
 | v8 | 09/10/2026 | Mise à jour de la référence de tests Playwright à 35 scénarios déclarés et documentation du reset Checkout, de la remise à zéro de la livraison entre sessions Checkout et du remplacement exclusif Standard ↔ Express. | `16. Paiement Stripe, webhook et création d’Order Medusa` — `16.13 Tests associés` |
 
 ---
@@ -47,7 +51,7 @@
 > Document technique de référence pour l’infrastructure e-commerce basée sur Medusa et son storefront.
 > Le `README.md` principal reste centré sur l’utilisation quotidienne, le démarrage, l’arrêt, le développement, les tests et la maintenance courante.
 >
-> **Version documentaire : v8 — mise à jour du 09/10/2026.**
+> **Version documentaire : v9 — mise à jour du 30/10/2026.**
 > **Dernière mise à jour des tarifs et choix de stockage médias : septembre 2026.**
 > Les tarifs externes doivent être revérifiés avant tout devis client.
 >
@@ -117,6 +121,10 @@ Envois automatiques générés par le site :
 - confirmation de remboursement ;
 - panier abandonné ;
 - notifications de compte et de commande.
+
+**Décision récente, distincte du budget historique :** **Resend** est retenu pour les futurs e-mails transactionnels de confirmation et de consultation des commandes, pour les invités comme pour les Customers. Ce service n'est **pas encore intégré** au parcours Phase A ; aucun lien invité n'est actuellement envoyé par Resend.
+
+Pour l'expliquer simplement : la boîte professionnelle permet à une personne de répondre à un client, tandis que le service transactionnel agit comme un **guichet automatique** qui remet un reçu après un événement confirmé par le serveur. Ce guichet ne doit pas envoyer un reçu de commande uniquement parce que le navigateur affiche une page de retour Stripe.
 
 ### 3.3 Email marketing
 
@@ -539,14 +547,14 @@ Le serveur Medusa et les tâches worker fonctionnent initialement dans la même 
 | Monitoring / logs | Render |
 | TLS / CDN storefront | Render |
 | Stockage médias | Cloudflare R2 Standard — 50 Go de référence |
-| Email transactionnel / marketing | Brevo Standard |
+| Email transactionnel / marketing | Brevo Standard — référence budgétaire de septembre 2026 ; Resend retenu ultérieurement pour l’implémentation transactionnelle, non intégrée et non chiffrée dans ce tableau |
 | Boîte mail professionnelle | OVHcloud Zimbra Pro — 50 Go |
 | Domaine | OVHcloud `.fr` |
 | Consentement cookies | Klaro |
 
 **Ordre de grandeur normalisé actuel : environ 833 €/an HT**, hors dépassements de consommation, dépassements éventuels des quotas d’opérations R2 et commissions de paiement.
 
-C’est **la configuration de référence pour l’article**.
+C’est **la configuration de référence pour l’article**. Le montant ci-dessus reste le **chiffrage historique de septembre 2026**, et n'est pas une nouvelle estimation incluant Resend. Avant un devis client, il faudra réconcilier le choix opérationnel Resend (transactionnel) avec l'offre marketing retenue et recalculer le coût correspondant. Cette mise à jour n'invente aucun nouveau tarif.
 
 ### 5.2 Niveau 2 — Infrastructure renforcée avec Worker séparé
 
@@ -591,7 +599,7 @@ Le passage à un Worker séparé est une évolution de capacité, pas une recons
 | Redis | **Render Key Value** | Scalingo Redis, Redis managé chez un autre fournisseur |
 | Storefront | **Render Static Site** | Scaleway, Cloudflare Pages, Netlify, Vercel |
 | Médias | **Cloudflare R2** | Scaleway Object Storage `fr-par`, OVHcloud Object Storage, Render Object Storage lorsqu’il sera suffisamment mature |
-| Email automatisé / marketing | **Brevo Standard** | Resend, SendGrid, Mailchimp |
+| Email automatisé / marketing | **Resend : choix retenu pour les futurs e-mails transactionnels de commande** ; **Brevo Standard : référence marketing de l’étude commerciale de septembre 2026** | SendGrid, Mailchimp et autres providers adaptables |
 | Boîte mail professionnelle | **OVHcloud Zimbra Pro** | Titan, Google Workspace, Microsoft 365 |
 | Domaine | **OVHcloud `.fr`** | Gandi, Infomaniak, Scaleway Domains |
 | Paiement | **Stripe** | autre Payment Provider compatible ou intégrable |
@@ -799,7 +807,7 @@ Certaines fonctions reposent sur des prestataires ou providers que l’architect
 
 - paiement : Stripe aujourd’hui ;
 - médias : Cloudflare R2 aujourd’hui ;
-- email : Brevo ou autre provider retenu ;
+- email : Resend retenu pour les futurs envois transactionnels de commande (non encore intégré) ; Brevo Standard conserve son rôle de référence marketing dans l’étude commerciale de septembre 2026 ;
 - transport : Chronopost ou autre intégration ;
 - hébergement / base de données / cache selon l’infrastructure retenue.
 
@@ -1083,6 +1091,49 @@ PostgreSQL managé en production
 
 La persistance de production est fournie par l’infrastructure de production, pas par le volume local Docker Desktop.
 
+### 15.12 PostgreSQL : module `guest-order-access` et migrations
+
+Pour sécuriser la consultation future des commandes passées sans compte Customer, nous avons ajouté un **module interne Medusa** `guest-order-access`. Ce module possède deux tables PostgreSQL :
+
+| Table | Rôle | Image mentale |
+| --- | --- | --- |
+| `guest_order_access` | Conserver l'empreinte du jeton principal permettant d'accéder à une Order invitée | Registre des **clés d'accès délivrées** |
+| `guest_order_session` | Conserver l'empreinte d'une session temporaire liée à un jeton principal | Registre des **badges temporaires** |
+
+Le serveur stocke des **empreintes SHA-256**, et non les jetons secrets en clair. En cas de consultation, il compare l'empreinte du justificatif présenté à celle enregistrée. Le numéro d'Order, l'e-mail et le `cartId` ne remplacent jamais cette preuve d'accès.
+
+Le module possède deux migrations de schéma :
+
+- `Migration20261026120000` : création du registre `guest_order_access`, déjà appliquée précédemment.
+- `Migration20261027160000` : création additive de `guest_order_session` (9 colonnes, 5 index explicites et une clé primaire), **appliquée à la base locale `medusa` le 30/10/2026**, et enregistrée seule sous l'identifiant d'historique `184`.
+
+Les champs `order_id` et `access_id` sont des **références contrôlées par le service**, sans clés étrangères PostgreSQL : la vérification du parent, de l'Order et de la révocation reste à la charge de la logique applicative. Ce choix ne doit pas être confondu avec une intégrité référentielle garantie par la base elle-même.
+
+#### Pourquoi une migration nécessite-t-elle des précautions ?
+
+Une migration ressemble à une **modification des plans d'un entrepôt en service** : ajouter un rayonnage ne doit pas déplacer ou détruire les marchandises déjà présentes. Le code de migration définit les changements de structure ; son application modifie réellement la base PostgreSQL, qui n'est pas enregistrée dans Git.
+
+Dans Medusa 2.19.0, la commande `db:migrate` peut aussi lancer des scripts applicatifs historiques, synchroniser des *links* et traiter Search. Plusieurs scripts historiques locaux ne sont pas enregistrés comme exécutés et peuvent toucher au catalogue, aux stocks ou à la configuration Stripe. Il ne faut **jamais** lancer `medusa db:migrate` sans audit préalable.
+
+La commande protégée **utilisée après vérification des modules actifs et des migrations réellement en attente** était :
+
+```powershell
+docker compose exec -T -w /medusa/apps/backend medusa ../../node_modules/.bin/medusa db:migrate --skip-scripts --skip-links --skip-search --all-or-nothing
+```
+
+Ses options signifient :
+
+- `--skip-scripts` : ne pas exécuter les scripts historiques applicatifs ;
+- `--skip-links` : ne pas synchroniser les links ;
+- `--skip-search` : ne pas traiter Search ;
+- `--all-or-nothing` : demander une exécution transactionnelle globale lorsque le migrateur le permet.
+
+**Attention :** cette commande n'est **pas ciblée sur un fichier**. Elle peut appliquer **toutes les migrations de schéma réellement en attente**. Elle ne doit donc être réutilisée qu'après avoir vérifié la base cible, les modules actifs, l'état des migrations et l'absence de migration inattendue ; l'option transactionnelle ne remplace pas ce contrôle.
+
+Après la migration du 30/10/2026, les vérifications en lecture seule ont confirmé les neuf colonnes, les cinq index métier/techniques et la clé primaire de `guest_order_session`, l'absence d'autre migration appliquée, l'historique `script_migrations` inchangé, `guest_order_access` inchangée et `/health` Medusa à `200`.
+
+Les tests d'intégration avec **une base PostgreSQL temporaire** ont réussi avant l'application locale. Cela ne signifie pas qu'une nouvelle suite complète a été exécutée après l'application à `medusa` ; la vérification post-migration portait sur le schéma et la santé du service.
+
 ---
 
 ## 16. Paiement Stripe, webhook et création d’Order Medusa
@@ -1245,6 +1296,35 @@ absence de délai configuré
 délai explicite
 → valeur respectée
 ```
+
+### 16.14 Statut du paiement invité dans la phase A
+
+Le parcours Customer existant continue d'utiliser Stripe Checkout hébergé. **Le paiement des invités, lui, reste volontairement bloqué** dans le storefront et côté Express (refus serveur). Un invité peut préparer son Checkout, fournir son e-mail et son adresse et sélectionner une livraison, mais **ne peut pas encore finaliser un achat**.
+
+**Analogie : une caisse de magasin dont le tapis et le calcul du total fonctionnent, mais dont le terminal de paiement est encore verrouillé.** Cela permet de valider le parcours et sa sécurité sans présenter un achat invité comme opérationnel.
+
+La preuve HMAC d'un panier invité fonctionne comme un **ticket de consigne signé** : elle est vérifiée côté serveur pour les opérations autorisées. Un `cartId` seul ou la saisie de l'e-mail d'un Customer existant ne permettent pas de s'approprier un panier Customer. L'arrivée d'un Customer authentifié ne fusionne pas silencieusement les deux paniers.
+
+Avant d'autoriser le paiement invité, il reste notamment à sécuriser les cas **PAY-01 / PAY-02** (paiement confirmé chez Stripe mais Order absente, puis éventuelle compensation/remboursement défaillante), à vérifier les contrôles de stock déjà introduits dans le parcours invité complet et à assurer la livraison d'une confirmation transactionnelle. Le retour du navigateur depuis Stripe n'est **jamais** une preuve suffisante pour créer une Order : seul le traitement serveur du résultat confirmé fait foi.
+
+### 16.15 Accès aux Orders invitées : jetons et sessions internes
+
+Une Order Customer reste accessible uniquement dans le contexte d'identité autorisé de son propriétaire. La route Store native `GET /store/orders/:id` ne doit pas devenir une porte d'entrée publique pour les invités : une connaissance de l'identifiant d'Order n'est pas une autorisation.
+
+La fondation interne ajoutée comprend :
+
+1. un **jeton d'accès principal** aléatoire, conservé sous forme d'empreinte SHA-256 dans `guest_order_access`, valable **90 jours** selon la politique retenue ;
+2. un **échange interne**, après vérification du jeton et de l'Order invitée finalisée, contre un jeton de session temporaire ;
+3. une **session fixe de 24 heures**, elle-même stockée uniquement sous forme d'empreinte SHA-256 dans `guest_order_session` ;
+4. une **invalidation des sessions** lorsque le jeton parent est renouvelé ou révoqué, avec verrouillage transactionnel PostgreSQL pour éviter les incohérences lors d'accès concurrents.
+
+**Analogie :** le jeton principal est une **clé personnelle durable** remise au client ; la session est le **badge visiteur de 24 heures** délivré après présentation de la clé. Révoquer la clé doit également rendre les anciens badges inutilisables.
+
+Le module et le médiateur sont **strictement internes**. Aucun échange HTTP public, cookie invité, page de consultation ou envoi de lien par Resend n'a été ouvert à ce stade. Les protections Customer existantes restent en place. Les tests ciblés réalisés lors du jalon ont abouti à **14/14 tests unitaires** et **7/7 tests d'intégration PostgreSQL**, avec nettoyage confirmé des bases temporaires.
+
+Pour le parcours public futur, les choix de conception validés sont : lien comportant l'identifiant d'Order dans son chemin et le jeton dans le **fragment `#`** (non transmis dans la requête HTTP initiale), suppression rapide du fragment dans l'historique navigateur, session transportée par un cookie `HttpOnly`, renouvellement de lien par e-mail avec réponse non révélatrice, révocation des sessions précédentes et limitations anti-abus persistées dans PostgreSQL. **Ces mécanismes de transport et d'envoi ne sont pas encore implémentés.**
+
+Un cookie `HttpOnly` peut être comparé à une **enveloppe que le navigateur remet au serveur automatiquement** : le JavaScript de la page ne peut pas lire directement son contenu. Cette enveloppe n'est toutefois pas, à elle seule, une preuve suffisante : le serveur doit toujours vérifier la session et sa chaîne d'autorisation.
 
 ---
 

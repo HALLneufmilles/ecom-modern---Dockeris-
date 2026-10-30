@@ -21,6 +21,17 @@ const order = {
 };
 
 const prepareReturnPage = async (page) => {
+  // The Order page reached after a confirmed Stripe return trusts the Customer
+  // session restored by nav.js, not only sessionStorage. This remains a mocked
+  // return-flow test and does not validate Medusa authentication itself.
+  await page.route("**/medusa-customer/session", (route) => route.fulfill({
+    status: 200,
+    contentType: "application/json",
+    body: JSON.stringify({
+      authenticated: true,
+      user: { name: "Username Playwright", email: "playwright@example.com" },
+    }),
+  }));
   await page.addInitScript(({ cartId }) => {
     if (sessionStorage.getItem("checkout_return_test_initialized")) return;
     sessionStorage.setItem("user", JSON.stringify({

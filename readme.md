@@ -1,7 +1,7 @@
 # Projet e-commerce — Storefront + Medusa + PostgreSQL
 
-**Version : v1**  
-**Date de publication : 09/10/2026**
+**Version : v2**  
+**Date de publication : 30/10/2026**
 
 <a id="table-des-matieres"></a>
 
@@ -34,6 +34,7 @@
 
 | Version | Date de publication | Modification | Chapitre / paragraphe concerné |
 |---|---|---|---|
+| v2 | 30/10/2026 | Ajout des tests ciblés Phase A (Playwright, unitaires et intégrations) ; distinction entre simulation et PostgreSQL réel ; statut Checkout invité, procédure prudente de migration Medusa et mise à jour des références documentaires. | `Utilisation quotidienne — Lancer les tests`, `Documents du projet`, `Medusa`, `PostgreSQL`, `Stripe Checkout en local`, `Tests de non-régression`, `Pour aller plus loin` |
 | v1 | 09/10/2026 | Première version suivie : mise à jour de la référence Playwright à 35 scénarios déclarés, ajout de l’inventaire actuel des tests, ajout des identifiants de test et mise à jour des références vers la documentation Infrastructure actuelle. | `Utilisation quotidienne — Lancer les tests`, `Identifiant de test`, `Documents du projet et localisation`, `Tests de non-régression`, références Infrastructure |
 
 ---
@@ -137,7 +138,7 @@ node .\node_modules\playwright\cli.js test f05-checkout
 node .\node_modules\playwright\cli.js test f06-payment-order
 ```
 
-Baseline actuellement validée :
+Baseline historique validée avant les ajouts Phase A :
 
 ```text
 35 scénarios Playwright déclarés
@@ -145,7 +146,25 @@ Wishlist activée : 34 réussis, 1 ignoré
 Wishlist désactivée : les deux scénarios F-17 conditionnels inversent leur statut
 ```
 
-Le scénario ignoré est attendu : un seul des deux scénarios F-17 (`wishlist` ON ou OFF) s’exécute selon la valeur du feature flag.
+Le scénario ignoré est attendu : un seul des deux scénarios F-17 (`wishlist` ON ou OFF) s’exécute selon la valeur du feature flag. **Ces 35 scénarios constituent la baseline historique** ; les nouveaux tests Phase A sont documentés séparément, sans annoncer une nouvelle suite complète validée.
+
+Tests Playwright ciblés Phase A, depuis la racine du dépôt (à lancer soi-même dans VS Code) :
+
+```powershell
+node .\node_modules\playwright\cli.js test tests/phase-a-stock-checkout.spec.js
+node .\node_modules\playwright\cli.js test tests/phase-a-guest-checkout.spec.js
+```
+
+Tests unitaires ciblés du service interne et du médiateur des commandes invitées, depuis la racine :
+
+```powershell
+docker compose exec -T -w /medusa/apps/backend medusa npm run test:unit -- src/modules/guest-order-access/__tests__/guest-order-access.service.unit.spec.ts
+docker compose exec -T -w /medusa/apps/backend medusa npm run test:unit -- src/api/__tests__/guest-order-access.unit.spec.ts
+```
+
+**Résultats du jalon :** 10/10 pour le service, 4/4 pour le médiateur et 7/7 dans une base PostgreSQL temporaire, soit **21/21** pour ces trois vérifications. Les tests de PostgreSQL ont été exécutés avant l'application de la migration à la base locale habituelle.
+
+Les tests d'intégration utilisant une base temporaire ou des **fixtures** (données d'essai préparées pour reproduire un scénario) nécessitent un environnement soigneusement isolé. Consulter la procédure du chapitre 9 avant de les exécuter : ne jamais lancer une commande destructive ou une migration de test contre la base de développement habituelle `medusa`.
 
 Test unitaire du webhook Stripe, depuis `medusa\apps\backend` :
 
@@ -221,8 +240,9 @@ Les documents permanents du projet doivent être retrouvables depuis cette secti
 | `compose.yaml` | **racine du projet** | définition des services Docker Compose |
 | `.env` | **racine locale uniquement — non commité** | secrets et variables d'environnement locales |
 | `docs/CARTOGRAPHIE_FONCTIONNELLE.md` | dossier `docs/` | fonctionnement métier, fiches F-01 à F-19 et cible fonctionnelle |
-| `docs/CODEX_PROJECT_BOOTSTRAP_v1.0.md` | dossier `docs/` | méthode générique de reprise / bootstrap d'un projet avec Codex |
-| `docs/INFRASTRUCTURE_MEDUSA_STOREFRONT_v8.md` | dossier `docs/` | architecture détaillée, socle modulaire, évolution multi-vendeur, production, Docker/Compose, Stripe, stockage, fournisseurs et coûts |
+| `docs/CODEX_PROJECT_BOOTSTRAP_v1.1.md` | dossier `docs/` | méthode générique de reprise / bootstrap d'un projet avec Codex |
+| `docs/INFRASTRUCTURE_MEDUSA_STOREFRONT_v9.md` | dossier `docs/` | architecture détaillée, socle modulaire, évolution multi-vendeur, production, Docker/Compose, Stripe, stockage, fournisseurs et coûts |
+| `docs/SOCLE_ECOMMERCE_MVDW_v4.md` | dossier `docs/` | règles métier et décisions du socle : panier, Customer, stock, Checkout et accès aux commandes invitées |
 | `docs/images/architecture/` | dossier `docs/` | schémas utilisés par le README et la documentation Infrastructure |
 
 ### Quelle documentation consulter ?
@@ -238,10 +258,13 @@ Je veux comprendre une fonction F-xx
 → docs/CARTOGRAPHIE_FONCTIONNELLE.md
 
 Je veux comprendre l'architecture ou un choix technique en détail
-→ docs/INFRASTRUCTURE_MEDUSA_STOREFRONT_v8.md
+→ docs/INFRASTRUCTURE_MEDUSA_STOREFRONT_v9.md
+
+Je veux retrouver les règles métier du socle et du Checkout invité
+→ docs/SOCLE_ECOMMERCE_MVDW_v4.md
 
 Je veux réutiliser notre méthode sur un autre projet
-→ docs/CODEX_PROJECT_BOOTSTRAP_v1.0.md
+→ docs/CODEX_PROJECT_BOOTSTRAP_v1.1.md
 ```
 
 > **Convention documentaire du projet : tout document permanent doit comporter une table des matières.**
@@ -260,7 +283,7 @@ Le storefront reste le site visible par le client. Medusa prend progressivement 
 
 Medusa n'est donc pas une nouvelle interface graphique à la place de notre boutique : il devient le **moteur métier** auquel le storefront se connecte.
 
-> 📚 **Plus de détails :** `docs/INFRASTRUCTURE_MEDUSA_STOREFRONT_v8.md`, sections *Rôle des composants* et *Architecture locale / production*.
+> 📚 **Plus de détails :** `docs/INFRASTRUCTURE_MEDUSA_STOREFRONT_v9.md`, sections *Rôle des composants* et *Architecture locale / production*.
 
 ---
 
@@ -309,7 +332,7 @@ Medusa
 PostgreSQL
 ```
 
-> 📚 **Plus de détails :** `docs/CARTOGRAPHIE_FONCTIONNELLE.md` pour les fonctions F-01 à F-19 et `docs/INFRASTRUCTURE_MEDUSA_STOREFRONT_v8.md` pour les décisions d'architecture.
+> 📚 **Plus de détails :** `docs/CARTOGRAPHIE_FONCTIONNELLE.md` pour les fonctions F-01 à F-19 et `docs/INFRASTRUCTURE_MEDUSA_STOREFRONT_v9.md` pour les décisions d'architecture.
 
 ---
 
@@ -348,7 +371,7 @@ Un **conteneur** est une instance réellement exécutée à partir d'une image.
 
 ![Du Dockerfile au conteneur](./docs/images/architecture/03-docker-build-flow.png)
 
-> 📚 **Plus de détails :** `docs/INFRASTRUCTURE_MEDUSA_STOREFRONT_v8.md`, section *Architecture locale Docker / Docker Compose*. On y retrouve `build:`, `image:`, `target`, ports, volumes, noms d'images/conteneurs et différence local / production.
+> 📚 **Plus de détails :** `docs/INFRASTRUCTURE_MEDUSA_STOREFRONT_v9.md`, section *Architecture locale Docker / Docker Compose*. On y retrouve `build:`, `image:`, `target`, ports, volumes, noms d'images/conteneurs et différence local / production.
 
 ---
 
@@ -420,7 +443,7 @@ docker compose down
 
 Supprime les conteneurs et le réseau Compose. Après cela, `start` ne suffit plus.
 
-> 📚 **Plus de détails :** `docs/INFRASTRUCTURE_MEDUSA_STOREFRONT_v8.md`.
+> 📚 **Plus de détails :** `docs/INFRASTRUCTURE_MEDUSA_STOREFRONT_v9.md`.
 
 ---
 
@@ -532,6 +555,10 @@ docker compose up -d --build medusa
 
 Puis vérifier `/health` avant un test fonctionnel.
 
+**Une reconstruction de l'image n'applique pas automatiquement une nouvelle migration de schéma.** L'image contient le code ; PostgreSQL conserve ses tables dans un volume distinct. C'est un peu comme installer une nouvelle version du logiciel de gestion d'un magasin : cela ne construit pas tout seul les nouveaux rayonnages prévus dans le plan de l'entrepôt.
+
+Les migrations Medusa demandent une vérification préalable : voir le chapitre « PostgreSQL » ci-dessous et le §15.12 de la documentation Infrastructure.
+
 ### Relation avec PostgreSQL
 
 ```text
@@ -545,7 +572,7 @@ PostgreSQL
       └── tables e-commerce
 ```
 
-> 📚 **Plus de détails :** `docs/INFRASTRUCTURE_MEDUSA_STOREFRONT_v8.md`, notamment le rôle du serveur Medusa, du Worker, de PostgreSQL et de Redis.
+> 📚 **Plus de détails :** `docs/INFRASTRUCTURE_MEDUSA_STOREFRONT_v9.md`, notamment le rôle du serveur Medusa, du Worker, de PostgreSQL et de Redis.
 
 ---
 
@@ -599,6 +626,22 @@ Commandes utiles dans `psql` :
 \q
 ```
 
+### Migrations Medusa : application contrôlée
+
+Les migrations correspondent aux changements de structure de PostgreSQL : ajout d'une table, d'une colonne ou d'un index. Le code de migration est enregistré dans Git ; **les données du volume PostgreSQL ne le sont pas**.
+
+Au jalon Phase A du 30/10/2026, les migrations `Migration20261026120000` et `Migration20261027160000` du module `guest-order-access` sont appliquées à la base locale `medusa`.
+
+⚠️ **Ne pas lancer `medusa db:migrate` sans analyse préalable.** Dans ce projet, la commande standard peut aussi exécuter des scripts historiques qui touchent au catalogue, aux stocks ou à Stripe.
+
+La commande sécurisée utilisée après audit était :
+
+```powershell
+docker compose exec -T -w /medusa/apps/backend medusa ../../node_modules/.bin/medusa db:migrate --skip-scripts --skip-links --skip-search --all-or-nothing
+```
+
+**Ce n'est pas une commande à relancer systématiquement :** elle applique toutes les migrations de schéma réellement en attente, pas seulement un fichier précis. Avant toute réutilisation, vérifier la base cible, la liste des migrations actives et les effets attendus, puis demander une autorisation explicite. Le détail des options est expliqué dans `docs/INFRASTRUCTURE_MEDUSA_STOREFRONT_v9.md`, §15.12.
+
 ### Afficher les volumes
 
 ```powershell
@@ -607,7 +650,7 @@ docker volume ls
 
 > ⚠️ `postgres-data` contient les données locales. Ne pas le supprimer par habitude.
 
-> 📚 **Plus de détails :** `docs/INFRASTRUCTURE_MEDUSA_STOREFRONT_v8.md`, sections sur les stockages, PostgreSQL, sauvegardes et architecture de production.
+> 📚 **Plus de détails :** `docs/INFRASTRUCTURE_MEDUSA_STOREFRONT_v9.md`, sections sur les stockages, PostgreSQL, sauvegardes et architecture de production.
 
 ---
 
@@ -615,7 +658,7 @@ docker volume ls
 
 ## 8. Stripe Checkout en local
 
-Le parcours actif utilise **Stripe Checkout hébergé**.
+Le parcours **Customer** actif utilise **Stripe Checkout hébergé**. Le parcours **invité** peut préparer le Checkout et choisir la livraison, mais **son paiement est volontairement désactivé** côté interface et refusé côté serveur pendant la phase A.
 
 ![Flux Stripe Checkout, webhook et Order Medusa](./docs/images/architecture/04-stripe-payment-flow.png)
 
@@ -668,7 +711,7 @@ Un délai explicitement configuré reste respecté.
 
 Carte bancaire et Link utilisent le même Checkout hébergé.
 
-> 📚 **Plus de détails :** `docs/INFRASTRUCTURE_MEDUSA_STOREFRONT_v8.md`, section *Paiement Stripe, webhook et création d'Order Medusa* : Payment Provider, événements, signature `whsec_...`, paiement synchrone/asynchrone, idempotence et différence local / production.
+> 📚 **Plus de détails :** `docs/INFRASTRUCTURE_MEDUSA_STOREFRONT_v9.md`, section *Paiement Stripe, webhook et création d'Order Medusa* : Payment Provider, événements, signature `whsec_...`, paiement synchrone/asynchrone, idempotence et différence local / production.
 
 ---
 
@@ -676,7 +719,7 @@ Carte bancaire et Link utilisent le même Checkout hébergé.
 
 ## 9. Tests de non-régression
 
-Baseline actuelle :
+Baseline historique, avant les tests ajoutés spécifiquement en phase A :
 
 ```text
 35 scénarios Playwright déclarés
@@ -684,7 +727,7 @@ Wishlist activée : 34 réussis, 1 ignoré
 Wishlist désactivée : les deux scénarios F-17 conditionnels inversent leur statut
 ```
 
-Le scénario ignoré est attendu : la suite contient un scénario F-17 pour la Wishlist activée et un autre pour la Wishlist désactivée.
+Le scénario ignoré est attendu : la suite contient un scénario F-17 pour la Wishlist activée et un autre pour la Wishlist désactivée. Ce décompte de 35 n'est **pas** un nouveau total de tous les tests ajoutés pendant la phase A.
 
 ### Suite complète
 
@@ -703,7 +746,7 @@ node .\node_modules\playwright\cli.js test f18-cart-update
 node .\node_modules\playwright\cli.js test f19-images
 ```
 
-### Inventaire actuel
+### Inventaire historique des 35 scénarios (avant les ajouts Phase A)
 
 | Fichier / périmètre | Scénarios | Couverture principale |
 |---|---:|---|
@@ -740,6 +783,29 @@ F-06 protège notamment :
 - retour non confirmé conservant le Cart ;
 - polling jusqu'à une Order finalisée par le webhook ;
 - priorité donnée à la finalisation d’un paiement réussi avant tout reset Checkout.
+
+### Tests ciblés Phase A : ce qu'ils vérifient
+
+| Catégorie | Fichiers concernés | Ce que le résultat prouve |
+| --- | --- | --- |
+| Playwright (parcours simulés) | `tests/f05-checkout.spec.js`, `tests/f06-payment-order.spec.js`, `tests/phase-a-stock-checkout.spec.js`, `tests/phase-a-guest-checkout.spec.js` | Les écrans et comportements prévus dans les scénarios, **sans prouver un débit bancaire Stripe réel** |
+| Tests unitaires Medusa | `guest-order-access.service.unit.spec.ts`, `guest-order-access.unit.spec.ts`, `guest-cart-access.unit.spec.ts`, `cart-inventory-availability.unit.spec.ts` | Les fonctions et règles de sécurité vérifiées de manière ciblée |
+| Intégration avec fixtures | `tests/phase-a-guest-checkout.integration.test.js`, `tests/phase-a-customer-ownership.integration.test.js` | Les restrictions Guest/Customer sur les données d'essai et le périmètre préparé |
+| Intégration PostgreSQL réelle | `guest-order-access.postgres.integration.spec.ts` | Le stockage des empreintes, la révocation, les expirations et la concurrence **sur une base PostgreSQL temporaire** |
+
+**Analogie :** un test simulé ressemble à une répétition avec une fausse carte bancaire ; un test d'intégration PostgreSQL vérifie une vraie porte et sa serrure, mais dans un bâtiment d'essai. Aucun des deux ne remplace à lui seul la validation complète de la boutique en production.
+
+Les commandes unitaires du service et du médiateur figurent aussi dans « Utilisation quotidienne — Lancer les tests ».
+
+Pour les tests PostgreSQL isolés :
+
+- utiliser le runner d'intégration Medusa avec une base temporaire nommée `mvdw_goa_it_*` ;
+- vérifier avant l'exécution que cette base et sa base `-template` n'existent pas déjà ;
+- conserver la préparation de connexion PostgreSQL adaptée à notre environnement de test (`ssl: false` et `sslmode: disable` lorsque le runner l'exige) ;
+- vérifier après exécution le **nettoyage effectif** des deux bases temporaires ;
+- ne pas remplacer cette procédure par une commande qui pointe vers la base locale `medusa`.
+
+Le test d'intégration réel du jalon a donné **7/7**, en complément des **10/10** tests unitaires du service et **4/4** du médiateur. Les suites plus larges n'ont pas été relancées après l'application de `Migration20261027160000` à la base locale habituelle.
 
 ### Test unitaire du webhook Stripe
 
@@ -910,7 +976,7 @@ Le README doit rester rapide à utiliser.
 Pour les explications de référence, consulter :
 
 ```text
-docs/INFRASTRUCTURE_MEDUSA_STOREFRONT_v8.md
+docs/INFRASTRUCTURE_MEDUSA_STOREFRONT_v9.md
 ```
 
 Ce document détaille notamment :
@@ -929,4 +995,5 @@ Ce document détaille notamment :
 - portabilité et archivage ;
 - fournisseurs, coûts et alternatives ;
 - principes du futur socle MVDW configurable par modules/options ;
+- accès sécurisé aux Orders invitées (jeton 90 jours, session 24 heures, module interne) et migrations PostgreSQL contrôlées ;
 - contraintes d'évolution vers une option multi-vendeur limitée à quelques vendeurs.

@@ -2,6 +2,7 @@ import { createHmac } from "crypto"
 import {
   protectStoreCart,
   protectStoreCartPath,
+  protectStoreOrderPath,
   verifyGuestCartProof,
 } from "../api/guest-cart-access"
 
@@ -72,5 +73,42 @@ describe("Store Cart ownership", () => {
     const transferredRes = response()
     await protectStoreCartPath(validReq as any, transferredRes, jest.fn())
     expect(transferredRes.status).toHaveBeenCalledWith(404)
+  })
+
+  it("allows only the owning Customer to retrieve a Store Order by ID", async () => {
+    const listOrders = jest.fn().mockResolvedValue([{ id: "order_customer", customer_id: "cus_owner" }])
+    const base = {
+      originalUrl: "/store/orders/order_customer",
+      scope: { resolve: () => ({ listOrders }) },
+      headers: {},
+    }
+
+    const ownerNext = jest.fn()
+    await protectStoreOrderPath({
+      ...base,
+      auth_context: { actor_type: "customer", actor_id: "cus_owner" },
+    } as any, response(), ownerNext)
+    expect(ownerNext).toHaveBeenCalledTimes(1)
+
+    for (const context of [undefined, { actor_type: "customer", actor_id: "cus_other" }]) {
+      const res = response()
+      await protectStoreOrderPath({ ...base, auth_context: context } as any, res, jest.fn())
+      expect(res.status).toHaveBeenCalledWith(404)
+      expect(res.json).toHaveBeenCalledWith({ message: "Order not found" })
+    }
+  })
+
+  it("keeps an unassociated Order closed until guest token access is implemented", async () => {
+    const listOrders = jest.fn().mockResolvedValue([{ id: "order_guest", customer_id: null }])
+    const res = response()
+    await protectStoreOrderPath({
+      originalUrl: "/store/orders/order_guest",
+      scope: { resolve: () => ({ listOrders }) },
+      headers: {},
+      auth_context: { actor_type: "customer", actor_id: "cus_any" },
+    } as any, res, jest.fn())
+
+    expect(res.status).toHaveBeenCalledWith(404)
+    expect(res.json).toHaveBeenCalledWith({ message: "Order not found" })
   })
 })

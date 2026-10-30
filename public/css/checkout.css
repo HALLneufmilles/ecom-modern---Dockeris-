@@ -119,6 +119,14 @@ body{
     color: #c62828;
 }
 
+.checkout-cart-return{
+    margin-top: 8px;
+}
+
+.checkout-cart-return[hidden]{
+    display: none;
+}
+
 .place-order-btn:disabled{
     cursor: wait;
     opacity: .65;

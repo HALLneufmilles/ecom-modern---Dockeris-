@@ -29,6 +29,17 @@ const checkoutRegressionCart = ({ quantity = 1, shippingOptionId, shippingTotal 
   };
 };
 
+// Checkout now relies on the Customer session restored by nav.js, rather than
+// only on the historical sessionStorage cache. F-05 remains a mocked UI/BFF
+// contract test: this route does not validate Medusa authentication itself.
+const mockAuthenticatedCustomerSession = async (page, user) => {
+  await page.route("**/medusa-customer/session", (route) => route.fulfill({
+    status: 200,
+    contentType: "application/json",
+    body: JSON.stringify({ authenticated: true, user }),
+  }));
+};
+
 test("F-05 - le Panier ignore une ancienne livraison jusqu'au choix Checkout courant", async ({ page }) => {
   const cartId = "cart_checkout_shipping_reset";
   const standardOption = { id: "so_standard", name: "Standard Shipping", amount: 0 };
@@ -49,6 +60,10 @@ test("F-05 - le Panier ignore une ancienne livraison jusqu'au choix Checkout cou
     shipping_methods: [{ shipping_option_id: expressOption.id }],
   };
 
+  await mockAuthenticatedCustomerSession(page, {
+    name: "Checkout test",
+    email: "checkout@example.com",
+  });
   await page.addInitScript(({ cartId }) => {
     sessionStorage.setItem("user", JSON.stringify({ name: "Checkout test", email: "checkout@example.com", seller: false }));
     sessionStorage.setItem("medusa_cart_id", cartId);
@@ -109,6 +124,10 @@ test("F-05 - le Panier ignore une ancienne livraison jusqu'au choix Checkout cou
 });
 
 test("F-05 - collecte l'identité de livraison sans billing storefront", async ({ page }) => {
+  await mockAuthenticatedCustomerSession(page, {
+    name: "Username Playwright",
+    email: "playwright@example.com",
+  });
   await page.goto("/");
   await page.evaluate(() => {
     localStorage.clear();
@@ -156,6 +175,9 @@ test("F-05 - collecte l'identité de livraison sans billing storefront", async (
         body: JSON.stringify({
           cart: checkoutCart,
           shippingOptions: [{ id: "so_standard", name: "Standard Shipping", amount: 0 }],
+          checkoutMode: "customer",
+          checkoutContact: { email: "playwright@example.com", phone: "0600000000" },
+          checkoutPaymentAvailable: true,
           stripeAvailable: true,
           stripeCheckoutAvailable: true,
           stripePublishableKey: "pk_test_playwright",
@@ -169,6 +191,9 @@ test("F-05 - collecte l'identité de livraison sans billing storefront", async (
         body: JSON.stringify({
           cart: checkoutCart,
           shippingOptions: [{ id: "so_standard", name: "Standard Shipping", amount: 0 }],
+          checkoutMode: "customer",
+          checkoutContact: { email: "playwright@example.com", phone: "0600000000" },
+          checkoutPaymentAvailable: true,
           stripeAvailable: true,
           stripeCheckoutAvailable: true,
           stripePublishableKey: "pk_test_playwright",
@@ -200,6 +225,9 @@ test("F-05 - collecte l'identité de livraison sans billing storefront", async (
   await page.goto("/checkout");
   await expect(page.locator(".heading")).toHaveText("checkout");
   await expect(page.locator(".sm-product-name")).toHaveText(cartSetup.productName);
+  await expect(page.locator("#email")).toHaveValue("playwright@example.com");
+  await expect(page.locator("#email")).toHaveJSProperty("readOnly", true);
+  await expect(page.locator("#phone")).toHaveValue("0600000000");
   await expect(page.locator('label[for="last_name"]')).toContainText("Nom");
   await expect(page.locator('label[for="first_name"]')).toContainText("Prénom");
   await expect(page.locator("#last_name")).toHaveAttribute("required", "");
@@ -249,13 +277,14 @@ test("F-05 - collecte l'identité de livraison sans billing storefront", async (
       pincode: "17000",
       landmark: "",
       country: "fr",
+      phone: "0600000000",
     },
+    email: "playwright@example.com",
   });
   expect(body.billingAddress).toBeUndefined();
   expect(body.billingAddressSameAsShipping).toBeUndefined();
   expect(body.billing_address).toBeUndefined();
   expect(Object.values(body.address)).not.toContain("Username Playwright");
-  expect(body.email).toBeUndefined();
   expect(body.items).toBeUndefined();
   expect(body.total).toBeUndefined();
   await expect(page).toHaveURL("https://checkout.stripe.com/c/pay/cs_test_playwright");
@@ -276,6 +305,10 @@ test("F-05 - synchronise livraison, quantités, totaux Medusa et erreurs de chec
   let expressAttempts = 0;
   let checkoutResets = 0;
 
+  await mockAuthenticatedCustomerSession(page, {
+    name: "Username Playwright",
+    email: "playwright@example.com",
+  });
   await page.addInitScript(({ cartId }) => {
     sessionStorage.setItem("user", JSON.stringify({
       name: "Username Playwright",

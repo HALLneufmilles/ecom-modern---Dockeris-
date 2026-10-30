@@ -514,6 +514,29 @@ const retrieveMedusaCart = async (cartId, token, guestProof) => {
   return data.cart;
 };
 
+const retrieveCartInventory = async (cartId, token, guestProof) => {
+  const data = await fetchMedusaStore(
+    `/store/carts/${encodeURIComponent(cartId)}/availability`,
+    { token, guestProof }
+  );
+  return data.inventory;
+};
+
+const cartWithInventory = async (cart, token, guestProof) => ({
+  cart,
+  inventory: await retrieveCartInventory(cart.id, token, guestProof),
+});
+
+const assertCartInventoryAvailable = async (cart, token, guestProof) => {
+  const inventory = await retrieveCartInventory(cart.id, token, guestProof);
+  if (inventory.sufficient) return inventory;
+
+  const error = new Error("insufficient_inventory");
+  error.status = 409;
+  error.data = { inventory };
+  throw error;
+};
+
 const updateMedusaCustomer = async (token, body) => {
   const data = await fetchMedusaStore("/store/customers/me", {
     method: "POST",
@@ -1005,7 +1028,10 @@ app.post("/medusa-cart/items", async (req, res) => {
 
 app.get("/medusa-cart/current", async (req, res) => {
   try {
-    return res.json({ cart: await resolveCurrentCart(req, res) });
+    const cart = await resolveCurrentCart(req, res);
+    if (!cart) return res.json({ cart: null });
+    const token = getMedusaCustomerToken(req);
+    return res.json(await cartWithInventory(cart, token, token ? null : getGuestCartProof(req)));
   } catch (error) {
     return res.status(error.status === 401 ? 401 : 502).json({ error: "cart_unavailable" });
   }
@@ -1013,8 +1039,8 @@ app.get("/medusa-cart/current", async (req, res) => {
 
 app.get("/medusa-cart/:id", async (req, res) => {
   try {
-    const { cart } = await requireCartAccess(req, res, req.params.id);
-    return res.json({ cart });
+    const { cart, token, guestProof } = await requireCartAccess(req, res, req.params.id);
+    return res.json(await cartWithInventory(cart, token, guestProof));
   } catch (error) {
     const status = error.status === 404 ? 404 : 502;
     return res.status(status).json({ error: status === 404 ? "cart_not_found" : "cart_unavailable" });
@@ -1039,7 +1065,7 @@ app.patch("/medusa-cart/:cartId/items/:lineId", async (req, res) => {
         guestProof,
       }
     );
-    return res.json({ cart: data.cart });
+    return res.json(await cartWithInventory(data.cart, token, guestProof));
   } catch (error) {
     if (error.status === 400 && /does not have the required inventory/i.test(error.message)) {
       return res.status(409).json({ error: "insufficient_inventory" });
@@ -1057,7 +1083,7 @@ app.delete("/medusa-cart/:cartId/items/:lineId", async (req, res) => {
       `/store/carts/${encodeURIComponent(req.params.cartId)}/line-items/${encodeURIComponent(req.params.lineId)}?fields=+items.total`,
       { method: "DELETE", token, guestProof }
     );
-    return res.json({ cart: data.parent });
+    return res.json(await cartWithInventory(data.parent, token, guestProof));
   } catch (error) {
     return res.status(error.status === 404 ? 404 : 502).json({
       error: error.status === 404 ? "cart_not_found" : "cart_delete_failed",
@@ -1541,68 +1567,105 @@ const sendCheckoutError = (res, error, fallback = "checkout_unavailable") => {
     "cart_completed",
     "empty_cart",
     "completed_order_not_found",
+    "insufficient_inventory",
+    "invalid_checkout_email",
+    "guest_checkout_payment_not_available",
   ]);
   const errorCode = publicErrors.has(error.message) ? error.message : fallback;
-  return res.status(status).json({ error: errorCode });
+  return res.status(status).json({
+    error: errorCode,
+    ...(errorCode === "insufficient_inventory" && error.data?.inventory
+      ? { inventory: error.data.inventory }
+      : {}),
+  });
 };
 
-const requireCheckoutContext = async (req, cartId) => {
-  const token = getMedusaCustomerToken(req);
-  if (!token) {
-    const error = new Error("authentication_required");
-    error.status = 401;
-    throw error;
-  }
-
-  const [customer, cart] = await Promise.all([
-    retrieveMedusaCustomer(token),
-    retrieveMedusaCart(cartId, token),
-  ]);
-
-  if (cart.customer_id !== customer.id) {
-    const error = new Error("cart_not_found");
-    error.status = 404;
-    throw error;
-  }
-  if (cart.completed_at) {
-    const error = new Error("cart_completed");
-    error.status = 409;
-    throw error;
-  }
-  if (!cart.items?.length) {
+const requireCheckoutContext = async (req, res, cartId) => {
+  const access = await requireCartAccess(req, res, cartId);
+  if (!access.cart.items?.length) {
     const error = new Error("empty_cart");
     error.status = 400;
     throw error;
   }
 
-  return { token, customer, cart };
+  if (!access.token) return { ...access, customer: null, checkoutMode: "guest" };
+
+  const { customer } = await resolveCartCustomer(req, res);
+  if (!customer || access.cart.customer_id !== customer.id) {
+    const error = new Error("cart_not_found");
+    error.status = 404;
+    throw error;
+  }
+  return { ...access, customer, checkoutMode: "customer" };
 };
 
-const retrieveShippingOptions = async (cartId, token) => {
+const checkoutContact = (cart, customer) => ({
+  email: customer?.email || cart.email || "",
+  phone: customer?.phone || cart.shipping_address?.phone || "",
+});
+
+const checkoutResponse = ({ cart, shippingOptions, paymentProviders = [], checkoutMode, customer }) => {
+  const checkoutPaymentAvailable = checkoutMode === "customer"
+    && paymentProviders.some((provider) => provider.id === MEDUSA_STRIPE_CHECKOUT_PROVIDER_ID);
+
+  return {
+    cart,
+    shippingOptions,
+    checkoutMode,
+    checkoutContact: checkoutContact(cart, customer),
+    checkoutPaymentAvailable,
+    stripeAvailable: checkoutMode === "customer" && paymentProviders.some(
+      (provider) => provider.id === MEDUSA_STRIPE_PROVIDER_ID
+    ),
+    stripeCheckoutAvailable: checkoutPaymentAvailable,
+    stripePublishableKey: checkoutPaymentAvailable
+      ? process.env.STRIPE_PUBLISHABLE_KEY || null
+      : null,
+  };
+};
+
+const retrieveShippingOptions = async (cartId, token, guestProof) => {
   const query = new URLSearchParams({ cart_id: cartId });
-  const data = await fetchMedusaStore(`/store/shipping-options?${query}`, { token });
+  const data = await fetchMedusaStore(`/store/shipping-options?${query}`, { token, guestProof });
   return data.shipping_options || [];
 };
 
-const replaceMedusaCartShippingMethod = async (cartId, shippingOptionId, token) => {
+const replaceMedusaCartShippingMethod = async (cartId, shippingOptionId, token, guestProof) => {
   const encodedCartId = encodeURIComponent(cartId);
 
   await fetchMedusaStore(`/store/carts/${encodedCartId}/shipping-methods/replace`, {
     method: "POST",
-    token,
+    token, guestProof,
   });
   await fetchMedusaStore(`/store/carts/${encodedCartId}/shipping-methods`, {
     method: "POST",
     body: { option_id: shippingOptionId },
-    token,
+    token, guestProof,
   });
 };
 
-const resetMedusaCartCheckout = async (cartId, token) => {
+const resetMedusaCartCheckout = async (cartId, token, guestProof) => {
   const encodedCartId = encodeURIComponent(cartId);
   await fetchMedusaStore(`/store/carts/${encodedCartId}/checkout/reset`, {
     method: "POST",
+    token, guestProof,
+  });
+};
+
+const updateMedusaCheckoutDetails = async (cartId, { email, shippingAddress }, token, guestProof) => {
+  const encodedCartId = encodeURIComponent(cartId);
+  const pathname = token
+    ? `/store/carts/${encodedCartId}`
+    : `/store/carts/${encodedCartId}/checkout/guest`;
+
+  await fetchMedusaStore(pathname, {
+    method: "POST",
+    body: {
+      email,
+      shipping_address: shippingAddress,
+    },
     token,
+    guestProof,
   });
 };
 
@@ -1621,10 +1684,11 @@ const checkoutAddress = (address, customer) => ({
   province: address.state,
   postal_code: address.pincode,
   country_code: address.country,
-  phone: customer.phone || undefined,
+  phone: address.phone || undefined,
 });
 
-const checkoutAddressFields = ["last_name", "first_name", "address", "street", "city", "state", "pincode", "country"];
+const checkoutAddressFields = ["last_name", "first_name", "address", "street", "city", "state", "pincode", "country", "phone"];
+const requiredCheckoutAddressFields = checkoutAddressFields.filter((field) => field !== "phone");
 const checkoutAddressMaxLengths = {
   last_name: 80,
   first_name: 80,
@@ -1634,6 +1698,22 @@ const checkoutAddressMaxLengths = {
   state: 80,
   pincode: 16,
   landmark: 120,
+  phone: 32,
+};
+const checkoutEmailPattern = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
+const normalizeCheckoutEmail = (email) => typeof email === "string" ? email.trim() : "";
+const isValidCheckoutEmail = (email) => email.length <= 254 && checkoutEmailPattern.test(email);
+
+const checkoutEmailForContext = (email, customer) => {
+  if (customer?.email) return customer.email;
+  const normalizedEmail = normalizeCheckoutEmail(email);
+  if (!isValidCheckoutEmail(normalizedEmail)) {
+    const error = new Error("invalid_checkout_email");
+    error.status = 400;
+    throw error;
+  }
+  return normalizedEmail;
 };
 const checkoutPostalCodePatterns = {
   fr: /^\d{5}$/,
@@ -1650,13 +1730,13 @@ const normalizeCheckoutAddress = (address) => {
   return Object.fromEntries(
     [...checkoutAddressFields, "landmark"].map((field) => [
       field,
-      typeof address[field] === "string" ? address[field].trim() : address[field],
+      typeof address[field] === "string" ? address[field].trim() : (field === "phone" || field === "landmark" ? "" : address[field]),
     ])
   );
 };
 
 const isValidCheckoutAddress = (address) => {
-  if (!address || !checkoutAddressFields.every((field) => typeof address[field] === "string" && address[field].trim())) {
+  if (!address || !requiredCheckoutAddressFields.every((field) => typeof address[field] === "string" && address[field].trim())) {
     return false;
   }
   if (typeof address.landmark !== "undefined" && typeof address.landmark !== "string") return false;
@@ -1733,21 +1813,14 @@ const buildStripeCheckoutProjection = (cart, shippingOptionName) => {
 
 app.get("/medusa-checkout/:cartId", async (req, res) => {
   try {
-    const { token, cart } = await requireCheckoutContext(req, req.params.cartId);
+    const { token, guestProof, cart, customer, checkoutMode } = await requireCheckoutContext(req, res, req.params.cartId);
+    await assertCartInventoryAvailable(cart, token, guestProof);
     const [shippingOptions, paymentProviders] = await Promise.all([
-      retrieveShippingOptions(cart.id, token),
-      retrievePaymentProviders(cart.region_id, token),
+      retrieveShippingOptions(cart.id, token, guestProof),
+      checkoutMode === "customer" ? retrievePaymentProviders(cart.region_id, token) : Promise.resolve([]),
     ]);
 
-    return res.json({
-      cart,
-      shippingOptions,
-      stripeAvailable: paymentProviders.some((provider) => provider.id === MEDUSA_STRIPE_PROVIDER_ID),
-      stripeCheckoutAvailable: paymentProviders.some(
-        (provider) => provider.id === MEDUSA_STRIPE_CHECKOUT_PROVIDER_ID
-      ),
-      stripePublishableKey: process.env.STRIPE_PUBLISHABLE_KEY || null,
-    });
+    return res.json(checkoutResponse({ cart, shippingOptions, paymentProviders, checkoutMode, customer }));
   } catch (error) {
     console.error("Medusa checkout initialization failed:", error.message);
     return sendCheckoutError(res, error);
@@ -1756,24 +1829,20 @@ app.get("/medusa-checkout/:cartId", async (req, res) => {
 
 app.post("/medusa-checkout/:cartId/reset", async (req, res) => {
   try {
-    const { token, cart } = await requireCheckoutContext(req, req.params.cartId);
-    await resetMedusaCartCheckout(cart.id, token);
+    const { token, guestProof, cart, customer, checkoutMode } = await requireCheckoutContext(req, res, req.params.cartId);
+    await assertCartInventoryAvailable(cart, token, guestProof);
+    await resetMedusaCartCheckout(cart.id, token, guestProof);
 
-    const updatedCart = await retrieveMedusaCart(cart.id, token);
+    const updatedCart = await retrieveMedusaCart(cart.id, token, guestProof);
+    await assertCartInventoryAvailable(updatedCart, token, guestProof);
     const [shippingOptions, paymentProviders] = await Promise.all([
-      retrieveShippingOptions(updatedCart.id, token),
-      retrievePaymentProviders(updatedCart.region_id, token),
+      retrieveShippingOptions(updatedCart.id, token, guestProof),
+      checkoutMode === "customer" ? retrievePaymentProviders(updatedCart.region_id, token) : Promise.resolve([]),
     ]);
 
-    return res.json({
-      cart: updatedCart,
-      shippingOptions,
-      stripeAvailable: paymentProviders.some((provider) => provider.id === MEDUSA_STRIPE_PROVIDER_ID),
-      stripeCheckoutAvailable: paymentProviders.some(
-        (provider) => provider.id === MEDUSA_STRIPE_CHECKOUT_PROVIDER_ID
-      ),
-      stripePublishableKey: process.env.STRIPE_PUBLISHABLE_KEY || null,
-    });
+    return res.json(checkoutResponse({
+      cart: updatedCart, shippingOptions, paymentProviders, checkoutMode, customer,
+    }));
   } catch (error) {
     console.error("Medusa checkout reset failed:", error.message);
     return sendCheckoutError(res, error);
@@ -1790,17 +1859,23 @@ app.post("/medusa-checkout/:cartId/stripe-checkout", async (req, res) => {
   }
 
   try {
-    const { token, customer, cart } = await requireCheckoutContext(req, req.params.cartId);
+    const { token, guestProof, customer, cart, checkoutMode } = await requireCheckoutContext(req, res, req.params.cartId);
+    if (checkoutMode === "guest") {
+      const error = new Error("guest_checkout_payment_not_available");
+      error.status = 403;
+      throw error;
+    }
+    const email = checkoutEmailForContext(req.body.email, customer);
     await fetchMedusaStore(`/store/carts/${encodeURIComponent(cart.id)}`, {
       method: "POST",
       body: {
-        email: customer.email,
+        email,
         shipping_address: checkoutAddress(address, customer),
       },
       token,
     });
 
-    const shippingOptions = await retrieveShippingOptions(cart.id, token);
+    const shippingOptions = await retrieveShippingOptions(cart.id, token, guestProof);
     const selectedShippingOption = shippingOptions.find(
       (option) => option.id === req.body.shippingOptionId
     );
@@ -1808,9 +1883,10 @@ app.post("/medusa-checkout/:cartId/stripe-checkout", async (req, res) => {
       return res.status(400).json({ error: "invalid_shipping_option" });
     }
 
-    await replaceMedusaCartShippingMethod(cart.id, selectedShippingOption.id, token);
+    await replaceMedusaCartShippingMethod(cart.id, selectedShippingOption.id, token, guestProof);
 
-    const updatedCart = await retrieveMedusaCart(cart.id, token);
+    const updatedCart = await retrieveMedusaCart(cart.id, token, guestProof);
+    await assertCartInventoryAvailable(updatedCart, token, guestProof);
     const paymentProviders = await retrievePaymentProviders(updatedCart.region_id, token);
     if (!paymentProviders.some((provider) => provider.id === MEDUSA_STRIPE_CHECKOUT_PROVIDER_ID)) {
       return res.status(503).json({ error: "stripe_checkout_not_available" });
@@ -1834,7 +1910,7 @@ app.post("/medusa-checkout/:cartId/stripe-checkout", async (req, res) => {
             ...projection,
             cart_id: updatedCart.id,
             payment_collection_id: paymentCollection.id,
-            customer_email: customer.email,
+            customer_email: email,
             success_url: stripeCheckoutUrl(
               `/stripe-checkout/return?session_id={CHECKOUT_SESSION_ID}&cart_id=${encodeURIComponent(updatedCart.id)}`
             ),
@@ -1880,7 +1956,7 @@ app.get("/stripe-checkout/status", async (req, res) => {
       return res.json({ status: "complete", order });
     }
 
-    const { cart } = await requireCheckoutContext(req, cartId);
+    const { cart } = await requireCheckoutContext(req, res, cartId);
     return res.json({ status: "pending", cart });
   } catch (error) {
     console.error("Stripe Checkout return status failed:", error.message);
@@ -1898,23 +1974,23 @@ app.post("/medusa-checkout/:cartId/shipping", async (req, res) => {
   }
 
   try {
-    const { token, customer, cart } = await requireCheckoutContext(req, req.params.cartId);
-    await fetchMedusaStore(`/store/carts/${encodeURIComponent(cart.id)}`, {
-      method: "POST",
-      body: {
-        email: customer.email,
-        shipping_address: checkoutAddress(address, customer),
-      },
-      token,
-    });
-    const shippingOptions = await retrieveShippingOptions(cart.id, token);
+    const { token, guestProof, customer, cart } = await requireCheckoutContext(req, res, req.params.cartId);
+    const email = checkoutEmailForContext(req.body.email, customer);
+    await assertCartInventoryAvailable(cart, token, guestProof);
+    await updateMedusaCheckoutDetails(cart.id, {
+      email,
+      shippingAddress: checkoutAddress(address, customer),
+    }, token, guestProof);
+    const shippingOptions = await retrieveShippingOptions(cart.id, token, guestProof);
     if (!shippingOptions.some((option) => option.id === req.body.shippingOptionId)) {
       return res.status(400).json({ error: "invalid_shipping_option" });
     }
 
-    await replaceMedusaCartShippingMethod(cart.id, req.body.shippingOptionId, token);
+    await replaceMedusaCartShippingMethod(cart.id, req.body.shippingOptionId, token, guestProof);
 
-    return res.json({ cart: await retrieveMedusaCart(cart.id, token) });
+    const updatedCart = await retrieveMedusaCart(cart.id, token, guestProof);
+    await assertCartInventoryAvailable(updatedCart, token, guestProof);
+    return res.json({ cart: updatedCart });
   } catch (error) {
     console.error("Medusa shipping selection failed:", error.message);
     return sendCheckoutError(res, error);
@@ -1929,37 +2005,46 @@ app.post("/medusa-checkout/:cartId/prepare", async (req, res) => {
   ) {
     return res.status(400).json({ error: "invalid_checkout_details" });
   }
-  if (!process.env.STRIPE_PUBLISHABLE_KEY) {
-    return res.status(503).json({ error: "stripe_not_configured" });
-  }
-
   try {
-    const { token, customer, cart } = await requireCheckoutContext(req, req.params.cartId);
+    const { token, guestProof, customer, cart, checkoutMode } = await requireCheckoutContext(req, res, req.params.cartId);
+    if (checkoutMode === "guest") {
+      const error = new Error("guest_checkout_payment_not_available");
+      error.status = 403;
+      throw error;
+    }
+    if (!process.env.STRIPE_PUBLISHABLE_KEY) {
+      return res.status(503).json({ error: "stripe_not_configured" });
+    }
+    const email = checkoutEmailForContext(req.body.email, customer);
+    await assertCartInventoryAvailable(cart, token, guestProof);
     const shipping = checkoutAddress(address, customer);
     await fetchMedusaStore(`/store/carts/${encodeURIComponent(cart.id)}`, {
       method: "POST",
       body: {
-        email: customer.email,
+        email,
         shipping_address: shipping,
       },
       token,
     });
 
-    const shippingOptions = await retrieveShippingOptions(cart.id, token);
+    const shippingOptions = await retrieveShippingOptions(cart.id, token, guestProof);
     if (!shippingOptions.some((option) => option.id === req.body.shippingOptionId)) {
       return res.status(400).json({ error: "invalid_shipping_option" });
     }
 
-    await replaceMedusaCartShippingMethod(cart.id, req.body.shippingOptionId, token);
+    await replaceMedusaCartShippingMethod(cart.id, req.body.shippingOptionId, token, guestProof);
 
-    const paymentProviders = await retrievePaymentProviders(cart.region_id, token);
+    const updatedCart = await retrieveMedusaCart(cart.id, token, guestProof);
+    await assertCartInventoryAvailable(updatedCart, token, guestProof);
+
+    const paymentProviders = await retrievePaymentProviders(updatedCart.region_id, token);
     if (!paymentProviders.some((provider) => provider.id === MEDUSA_STRIPE_PROVIDER_ID)) {
       return res.status(503).json({ error: "stripe_not_available" });
     }
 
     const collectionData = await fetchMedusaStore("/store/payment-collections", {
       method: "POST",
-      body: { cart_id: cart.id },
+      body: { cart_id: updatedCart.id },
       token,
       timeout: 15000,
     });
@@ -1983,7 +2068,6 @@ app.post("/medusa-checkout/:cartId/prepare", async (req, res) => {
       throw new Error("stripe_client_secret_missing");
     }
 
-    const updatedCart = await retrieveMedusaCart(cart.id, token);
     return res.json({
       cart: updatedCart,
       clientSecret,
@@ -1998,6 +2082,14 @@ app.post("/medusa-checkout/:cartId/prepare", async (req, res) => {
 app.post("/medusa-checkout/:cartId/complete", async (req, res) => {
   const token = getMedusaCustomerToken(req);
   if (!token) {
+    try {
+      const { checkoutMode } = await requireCheckoutContext(req, res, req.params.cartId);
+      if (checkoutMode === "guest") {
+        return res.status(403).json({ error: "guest_checkout_payment_not_available" });
+      }
+    } catch (error) {
+      return sendCheckoutError(res, error);
+    }
     return res.status(401).json({ error: "authentication_required" });
   }
 
